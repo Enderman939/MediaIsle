@@ -28,7 +28,7 @@ MediaIsle 是一枚悬浮于屏幕顶部中央的"灵动岛"——它实时显�
 ## 运行
 
 ```bash
-git clone https://github.com/Enderman939/mediaisle.git
+git clone https://github.com/Enderman939/MediaIsle.git
 cd mediaisle
 npm install
 npm start
