@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>MediaIsle 设置</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <div class="md3-app">
+
+    <!-- 顶栏 (MD3 Top App Bar, 自绘标题栏) -->
+    <header class="md3-app-bar">
+      <span class="md3-app-bar__title">设置</span>
+      <div class="md3-app-bar__actions">
+        <button class="md3-icon-btn" id="btnMin" aria-label="最小化" title="最小化">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+        <button class="md3-icon-btn" id="btnClose" aria-label="关闭" title="关闭">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="md3-app__body">
+
+    <!-- 导航抽屉 (MD3 Navigation Drawer) -->
+    <aside class="md3-drawer">
+      <div class="md3-drawer__header">
+        <div class="md3-drawer__meta">
+          <div class="md3-drawer__name">MediaIsle</div>
+          <div class="md3-drawer__ver">版本 1.0.0</div>
+        </div>
+      </div>
+      <nav class="md3-drawer__nav">
+        <button class="md3-nav-item active" data-page="general">
+          <span class="md3-nav-item__icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zm8.6 3.5c0-.5 0-1-.1-1.4l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-2.4-1.4L15.3 2h-4l-.4 2.7c-.9.3-1.7.8-2.4 1.4l-2.4-1-2 3.4 2 1.6a8.6 8.6 0 0 0 0 2.8l-2 1.6 2 3.4 2.4-1c.7.6 1.5 1 2.4 1.4l.4 2.7h4l.4-2.7c.9-.3 1.7-.8 2.4-1.4l2.4 1 2-3.4-2-1.6c.1-.5.1-.9.1-1.4z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <span class="md3-nav-item__label">常规</span>
+        </button>
+        <button class="md3-nav-item" data-page="stats">
+          <span class="md3-nav-item__icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span class="md3-nav-item__label">听歌数据</span>
+        </button>
+      </nav>
+    </aside>
+
+    <!-- 内容区 -->
+    <main class="md3-content">
+
+      <!-- 常规 -->
+      <section id="page-general" class="md3-page active">
+        <h1 class="md3-page-title">常规</h1>
+
+        <div class="md3-section-label">外观与功能</div>
+        <div class="md3-group">
+          <div class="md3-row">
+            <div class="md3-row__txt">
+              <div class="md3-row__headline">毛玻璃模式</div>
+              <div class="md3-row__support">岛体半透明质感（模拟）</div>
+            </div>
+            <label class="md3-switch">
+              <input type="checkbox" id="swGlass" aria-label="毛玻璃模式">
+              <span class="md3-switch__track"></span>
+            </label>
+          </div>
+          <div class="md3-row">
+            <div class="md3-row__txt">
+              <div class="md3-row__headline">桌面歌词</div>
+              <div class="md3-row__support">屏幕底部显示当前歌词句</div>
+            </div>
+            <label class="md3-switch">
+              <input type="checkbox" id="swDlyr" aria-label="桌面歌词">
+              <span class="md3-switch__track"></span>
+            </label>
+          </div>
+          <div class="md3-row">
+            <div class="md3-row__txt">
+              <div class="md3-row__headline">双语字幕</div>
+              <div class="md3-row__support">歌词下方显示原文/译文对照</div>
+            </div>
+            <label class="md3-switch">
+              <input type="checkbox" id="swBi" aria-label="双语字幕">
+              <span class="md3-switch__track"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="md3-section-label">系统</div>
+        <div class="md3-group">
+          <div class="md3-row">
+            <div class="md3-row__txt">
+              <div class="md3-row__headline">登录时自动启动</div>
+              <div class="md3-row__support">登录 Windows 后在后台运行</div>
+            </div>
+            <label class="md3-switch">
+              <input type="checkbox" id="swAuto" aria-label="登录时自动启动">
+              <span class="md3-switch__track"></span>
+            </label>
+          </div>
+          <div class="md3-row">
+            <div class="md3-row__txt">
+              <div class="md3-row__headline">全屏时自动隐藏</div>
+              <div class="md3-row__support">游戏 / 视频全屏时暂时收起岛体</div>
+            </div>
+            <label class="md3-switch">
+              <input type="checkbox" id="swFs" aria-label="全屏时自动隐藏">
+              <span class="md3-switch__track"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="md3-section-label">歌词</div>
+        <div class="md3-group">
+          <div class="md3-row">
+            <div class="md3-row__txt">
+              <div class="md3-row__headline">获取策略</div>
+              <div class="md3-row__support">汽水本地缓存 / 网易云 / QQ音乐 / 酷狗</div>
+            </div>
+            <div class="md3-select">
+              <select id="selLyric" class="md3-select__native" aria-label="歌词获取策略">
+                <option value="race">竞速 · 先到先得</option>
+                <option value="quality">质量 · 全源比对</option>
+                <option value="soda">汽水音乐 · 本地缓存</option>
+                <option value="netease">仅网易云</option>
+                <option value="qq">仅 QQ 音乐</option>
+                <option value="kugou">仅酷狗</option>
+              </select>
+              <span class="md3-select__value" id="selLyricLabel"></span>
+              <svg class="md3-select__arrow" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7.4 9.2 12 13.8l4.6-4.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+          </div>
+          <div class="md3-row">
+            <div class="md3-row__txt">
+              <div class="md3-row__headline">匹配精度</div>
+              <div class="md3-row__support">自动核对标题与歌手，避免同名词曲误配</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 听歌数据 -->
+      <section id="page-stats" class="md3-page">
+        <h1 class="md3-page-title">听歌数据</h1>
+        <div class="md3-sum" id="sumTotal"></div>
+
+        <div class="md3-card">
+          <div class="md3-card__title">近 14 天收听时长</div>
+          <canvas id="chartDays" height="150"></canvas>
+          <div class="md3-x-labels" id="dayLabels"></div>
+        </div>
+
+        <div class="md3-card">
+          <div class="md3-card__title">最常听 Top 8</div>
+          <canvas id="chartTop" height="180"></canvas>
+        </div>
+
+        <div class="md3-card md3-card--table">
+          <div class="md3-tbl-box">
+            <table class="md3-table">
+              <thead>
+                <tr><th>曲目</th><th>歌手</th><th>来源</th><th class="num">次数</th><th class="num">时长</th></tr>
+              </thead>
+              <tbody id="trackRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+    </main>
+    </div>
+  </div>
+  <script src="settings.js"></script>
+</body>
+</html>

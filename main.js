@@ -1,0 +1,1062 @@
+// =====================================================================
+// MediaIsle - 主进程
+// 灵动岛风格 Windows 媒体控制悬浮窗
+//  - 透明无边框置顶窗, 悬浮于屏幕顶部中间
+//  - 默认鼠标穿透, 悬停岛内时恢复交互
+//  - 通过 PowerShell 桥接(bridge.ps1)读取/控制系统媒体(SMTC)
+// =====================================================================
+const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage } = require('electron');
+const { spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+const os = require('os');
+
+// ---------------------------------------------------------------- 更名数据迁移
+// 应用由 FastMusic Island 更名 MediaIsle, userData 目录随名变化,
+// 首次启动时把旧目录的配置与统计数据一次性搬迁, 避免用户数据"丢失"
+try {
+  const newDir = app.getPath('userData');
+  const appdataDir = path.dirname(newDir);
+  for (const oldName of ['FastMusic Island', 'fastmusic-island']) {
+    if (path.basename(newDir).toLowerCase() === oldName.toLowerCase()) continue;
+    const oldDir = path.join(appdataDir, oldName);
+    if (!fs.existsSync(oldDir)) continue;
+    let copied = false;
+    for (const f of ['config.json', 'stats.json']) {
+      const src = path.join(oldDir, f);
+      const dst = path.join(newDir, f);
+      try {
+        if (fs.existsSync(src) && !fs.existsSync(dst)) { fs.copyFileSync(src, dst); copied = true; }
+      } catch { }
+    }
+    if (copied) console.log('[migrate] 已从 ' + oldName + ' 迁移用户数据 -> ' + path.basename(newDir));
+    break;
+  }
+} catch { }
+
+// 窗口尺寸: 容纳展开态(含右侧歌词竖栏)灵动岛 + 少量余量(动画/阴影)
+const WIN_W = 710;
+const WIN_H = 258;
+const WIN_TOP_GAP = 8; // 距屏幕顶部间距
+
+// 命令文件: 主进程 -> PS 桥接的单向命令通道(PS 5.1 无法非阻塞读 stdin)
+const CMD_FILE = path.join(os.tmpdir(), 'fastmusic-island-cmd.json');
+const CMD_TMP = CMD_FILE + '.tmp';
+
+// ---------------------------------------------------------------- 错误日志
+// 所有错误(渲染层 console.error / 主进程异常 / 桥接 stderr)统一:
+//   1) 打印到控制台  2) 追加写入 error.log, 方便用户复制反馈
+const LOG_FILE = path.join(app.getPath('userData'), 'error.log');
+function logErr(tag, ...parts) {
+  const line = `[${new Date().toLocaleTimeString('zh-CN', { hour12: false })}] ${tag} ${parts.map((p) => (p instanceof Error ? (p.stack || p.message) : String(p))).join(' ')}`;
+  console.error(line);
+  try { fs.appendFileSync(LOG_FILE, line + '\n'); } catch { }
+}
+process.on('uncaughtException', (err) => logErr('[main:uncaught]', err));
+process.on('unhandledRejection', (reason) => logErr('[main:unhandled]', reason));
+
+// 渲染层 console 转发: 带来源文件:行号; error 级别额外落盘
+function attachConsoleForward(winObj, tag) {
+  winObj.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+    const src = sourceId ? ` (${String(sourceId).split(/[\\/]/).pop()}:${line})` : '';
+    if (level >= 2) logErr(`[${tag}]`, message + src);
+    else console.log(`[${tag}]`, message + src);
+  });
+}
+
+// 配置持久化(毛玻璃/桌面歌词)
+const CFG_FILE = path.join(app.getPath('userData'), 'config.json');
+let cfg = { glass: false, dlyr: false, lyrics: 'race', fsHide: true, bilingual: true };
+try { Object.assign(cfg, JSON.parse(fs.readFileSync(CFG_FILE, 'utf8'))); } catch { }
+let cfgTimer = null;
+function saveCfg() {
+  clearTimeout(cfgTimer);
+  cfgTimer = setTimeout(() => {
+    try { fs.writeFileSync(CFG_FILE, JSON.stringify(cfg)); } catch { }
+  }, 600);
+}
+
+// ---------------------------------------------------------------- 听歌统计
+// 主进程统一记录: 每日时长 + 每曲目播放次数/时长 (设置窗口展示图表)
+const STATS_FILE = path.join(app.getPath('userData'), 'stats.json');
+let stats = { days: {}, tracks: {}, lastPlayKey: '' };
+try {
+  const loaded = JSON.parse(fs.readFileSync(STATS_FILE, 'utf8'));
+  if (loaded && typeof loaded === 'object') {
+    stats.days = loaded.days || {};
+    stats.tracks = loaded.tracks || {};
+    stats.lastPlayKey = loaded.lastPlayKey || '';
+  }
+} catch { }
+let statsDirty = false;
+let statsPersistTimer = null;
+
+function todayKeyStr(offsetDays = 0) {
+  const d = new Date(Date.now() - offsetDays * 864e5);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function fmtHMain(sec) {
+  if (sec < 60) return '';
+  if (sec < 3600) return Math.round(sec / 60) + ' 分钟';
+  return (sec / 3600).toFixed(1) + ' 小时';
+}
+function scheduleStatsPersist() {
+  if (statsPersistTimer) return;
+  statsPersistTimer = setTimeout(() => {
+    statsPersistTimer = null;
+    if (!statsDirty) return;
+    statsDirty = false;
+    try { fs.writeFileSync(STATS_FILE, JSON.stringify(stats)); } catch { }
+    // 设置窗口打开时推送刷新
+    if (setWin && !setWin.isDestroyed()) setWin.webContents.send('stats-updated');
+  }, 3000);
+}
+function bumpStats(msg) {
+  bumpStats._t = bumpStats._t || Date.now();
+  const now = Date.now();
+  const dt = Math.min(2, Math.max(0, (now - bumpStats._t) / 1000));
+  bumpStats._t = now;
+  if (!msg.hasSession || msg.status !== 'Playing' || !msg.title) return;
+
+  const tk = todayKeyStr();
+  if (!stats.days[tk]) stats.days[tk] = 0;
+  stats.days[tk] += dt;
+
+  const key = (msg.appId || '') + '|' + msg.title + '|' + (msg.artist || '');
+  let tr = stats.tracks[key];
+  if (!tr) tr = stats.tracks[key] = { t: msg.title, a: msg.artist || '', s: msg.source || '', sec: 0, plays: 0, last: 0 };
+  tr.sec += dt;
+  tr.last = now;
+  if (key !== stats.lastPlayKey) {
+    tr.plays += 1;
+    stats.lastPlayKey = key;
+  }
+
+  // 曲目数上限: 超出淘汰最久未播的
+  const keys = Object.keys(stats.tracks);
+  if (keys.length > 600) {
+    keys.sort((x, y) => (stats.tracks[x].last || 0) - (stats.tracks[y].last || 0));
+    for (let i = 0; i < 100; i++) delete stats.tracks[keys[i]];
+  }
+  statsDirty = true;
+  scheduleStatsPersist();
+
+  // 主窗底部统计文本 (≥5s 推送一次)
+  if (now - (bumpStats._push || 0) > 5000) {
+    bumpStats._push = now;
+    const t = fmtHMain(stats.days[tk] || 0);
+    let week = 0;
+    for (let i = 0; i < 7; i++) week += stats.days[todayKeyStr(i)] || 0;
+    const w = fmtHMain(week);
+    const text = t && w ? `今日 ${t} · 本周 ${w}` : (t ? `今日 ${t}` : (w ? `本周 ${w}` : ''));
+    send('stats-text', text);
+  }
+}
+
+let win = null;
+let bridge = null;
+let bridgeRestartCount = 0;
+let bridgeLastStart = 0;
+let artCache = { hash: null, data: null };
+let tray = null;
+let hiddenByUser = false;
+let hiddenByFs = false;
+let lastFs = false;
+
+function send(ch, ...args) {
+  if (win && !win.isDestroyed()) win.webContents.send(ch, ...args);
+}
+
+// ---------------------------------------------------------------- 窗口
+function positionWindow() {
+  if (!win) return;
+  const { workArea } = screen.getPrimaryDisplay();
+  win.setPosition(
+    Math.round(workArea.x + (workArea.width - WIN_W) / 2),
+    workArea.y + WIN_TOP_GAP,
+    false
+  );
+}
+
+function createWindow() {
+  win = new BrowserWindow({
+    width: WIN_W,
+    height: WIN_H,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    hasShadow: false,
+    focusable: false,       // 不抢焦点
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      spellcheck: false,
+    },
+  });
+
+  win.setAlwaysOnTop(true, 'screen-saver');
+  try { win.setVisibleOnAllWorkspaces(true); } catch { }
+  positionWindow();
+
+  // 默认鼠标穿透(悬停检测由主进程光标轮询完成)
+  win.setIgnoreMouseEvents(true);
+
+  win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  win.once('ready-to-show', () => {
+    win.showInactive();
+    keepOnTop();
+    send('glass-changed', !!cfg.glass);
+    send('bilingual-changed', cfg.bilingual !== false);
+  });
+
+  // 调试: 转发渲染层 console 输出 (error/warning 级别同时写入 error.log)
+  attachConsoleForward(win, 'renderer');
+
+  // 分辨率/显示器变化时重新定位
+  screen.on('display-metrics-changed', positionWindow);
+  screen.on('display-added', positionWindow);
+
+  if (process.env.ISLAND_DEVTOOLS) {
+    win.webContents.openDevTools({ mode: 'detach' });
+  }
+}
+
+// ---------------------------------------------------------------- 桥接
+function startBridge() {
+  bridgeLastStart = Date.now();
+  const bridgePath = path.join(__dirname, 'bridge.ps1');
+  bridge = spawn('powershell.exe', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy', 'Bypass',
+    '-File', bridgePath,
+    '-IntervalMs', '500',
+    '-CommandFile', CMD_FILE,
+  ], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+
+  let buf = '';
+  bridge.stdout.setEncoding('utf8');
+  bridge.stdout.on('data', (chunk) => {
+    buf += chunk;
+    let idx;
+    while ((idx = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (!line) continue;
+      try { handleBridgeLine(JSON.parse(line)); }
+      catch { /* 忽略坏行 */ }
+    }
+  });
+
+  bridge.stderr.setEncoding('utf8');
+  bridge.stderr.on('data', (d) => logErr('[bridge:stderr]', String(d).trim()));
+
+  bridge.on('exit', (code) => {
+    bridge = null;
+    const ranMs = Date.now() - bridgeLastStart;
+    if (ranMs > 60000) bridgeRestartCount = 0; // 稳定运行过则重置计数
+    if (bridgeRestartCount < 5) {
+      bridgeRestartCount++;
+      setTimeout(() => { if (!bridge && !app.isQuitting) startBridge(); }, 1500);
+    } else {
+      console.error(`[bridge] 桥接进程退出(code=${code}), 已达重启上限`);
+      logErr('[bridge]', `桥接进程退出(code=${code}), 已达重启上限`);
+    }
+  });
+}
+
+function handleBridgeLine(msg) {
+  if (!win || win.isDestroyed()) return;
+  if (msg.type === 'ready') {
+    console.log('[bridge] ready');
+  } else if (msg.type === 'state') {
+    // 封面缓存: bridge 只在封面变化帧附带 art, 此处补全其余帧
+    if (msg.art) {
+      artCache = { hash: msg.artHash, data: msg.art };
+    } else if (msg.artHash && artCache.hash === msg.artHash) {
+      msg.art = artCache.data;
+    }
+    if (!msg.hasSession) artCache = { hash: null, data: null };
+    bumpStats(msg);
+    win.webContents.send('media-state', msg);
+  } else if (msg.type === 'error') {
+    logErr('[bridge]', msg.message);
+  } else if (msg.type === 'volume') {
+    send('volume-changed', msg);
+  } else if (msg.type === 'fs') {
+    // 全屏应用前台时隐藏岛体, 退出全屏恢复 (可在设置中关闭)
+    if (msg.v && cfg.fsHide && win && win.isVisible() && !hoverInside) {
+      hiddenByFs = true;
+      win.hide();
+    } else if (!msg.v && hiddenByFs) {
+      hiddenByFs = false;
+      if (!hiddenByUser) { win.showInactive(); keepOnTop(); }
+    }
+  }
+}
+
+function sendCommand(cmd, val) {
+  // 数值 -> position(seek/volume), 字符串 -> appId(switch-source)
+  let payload;
+  if (typeof val === 'number' && isFinite(val)) payload = { cmd, position: val };
+  else if (typeof val === 'string' && val.length) payload = { cmd, appId: val };
+  else payload = { cmd };
+  try {
+    // 追加写入命令文件(先写临时文件再原子替换, 避免桥接读到半行)
+    let content = JSON.stringify(payload) + '\n';
+    try {
+      if (fs.existsSync(CMD_FILE)) {
+        const prev = fs.readFileSync(CMD_FILE, 'utf8');
+        if (prev.length < 4096) content = prev + content; // 未消费的命令合并
+      }
+    } catch { /* 读旧文件失败则覆盖 */ }
+    fs.writeFileSync(CMD_TMP, content, 'utf8');
+    fs.renameSync(CMD_TMP, CMD_FILE);
+  } catch (err) {
+    logErr('[bridge]', '命令写入失败:', err.message);
+  }
+}
+
+// ---------------------------------------------------------------- IPC
+// 悬停检测: Electron 的 setIgnoreMouseEvents(forward) 在 Windows 上
+// 无法可靠转发 mousemove, 改为主进程轮询光标位置做命中检测
+const ISLAND_RECTS = {
+  idle:           { w: 92,  h: 36  }, // 尺寸与 renderer/style.css 保持一致
+  compact:        { w: 238, h: 37  },
+  volume:         { w: 238, h: 37  },
+  notify:         { w: 320, h: 54  },
+  expanded:       { w: 672, h: 214 },
+  'expanded-empty': { w: 406, h: 214 },
+  favlist:        { w: 406, h: 214 },
+};
+const ISLAND_TOP = 3; // 岛距窗口顶部偏移(stage padding-top)
+
+let islandState = 'idle';
+let hoverInside = false;
+let islandDragging = false;
+
+function islandScreenRect() {
+  const s = ISLAND_RECTS[islandState] || ISLAND_RECTS.idle;
+  const [wx, wy] = win.getPosition();
+  return {
+    x: Math.round(wx + (WIN_W - s.w) / 2),
+    y: wy + ISLAND_TOP,
+    w: s.w,
+    h: s.h,
+  };
+}
+
+function evaluateHover() {
+  if (!win || win.isDestroyed() || !win.isVisible()) return;
+  const r = islandScreenRect();
+  const c = screen.getCursorScreenPoint();
+  const inside = c.x >= r.x && c.x <= r.x + r.w && c.y >= r.y && c.y <= r.y + r.h;
+  const target = islandDragging ? true : inside; // 拖动进度时保持展开
+  if (target !== hoverInside) {
+    hoverInside = target;
+    win.setIgnoreMouseEvents(!hoverInside);
+    win.webContents.send('hover-changed', hoverInside);
+  }
+}
+
+setInterval(evaluateHover, 80);
+
+// ---------------------------------------------------------------- 置顶保持
+// Windows 下其他应用置顶/激活会挤掉我们的 topmost 状态, 需周期性重新宣告。
+// moveTop() 只调整 z-order, 不抢焦点。
+function keepOnTop() {
+  try {
+    if (win && !win.isDestroyed() && win.isVisible()) {
+      win.setAlwaysOnTop(true, 'screen-saver');
+      win.moveTop();
+    }
+  } catch { }
+  try {
+    if (dlWin && !dlWin.isDestroyed() && dlWin.isVisible()) {
+      dlWin.setAlwaysOnTop(true, 'screen-saver');
+      dlWin.moveTop();
+    }
+  } catch { }
+}
+setInterval(keepOnTop, 1200);
+
+ipcMain.on('island-state', (_e, st) => {
+  if (ISLAND_RECTS[st]) islandState = st;
+  evaluateHover(); // 形态变化后立即按新矩形重估
+});
+
+ipcMain.on('island-dragging', (_e, d) => {
+  islandDragging = !!d;
+  if (!islandDragging) evaluateHover();
+});
+
+ipcMain.on('media-command', (_e, cmd, val) => {
+  sendCommand(cmd, val);
+});
+
+// ---------------------------------------------------------------- 设置窗口
+let setWin = null;
+function createSettingsWindow() {
+  if (setWin && !setWin.isDestroyed()) { setWin.focus(); return; }
+  setWin = new BrowserWindow({
+    width: 780,
+    height: 580,
+    minWidth: 640,
+    minHeight: 440,
+    title: 'MediaIsle 设置',
+    backgroundColor: '#141218',
+    frame: false,           // 自绘 MD3 顶栏(安卓风格)
+    resizable: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      spellcheck: false,
+    },
+  });
+  setWin.loadFile(path.join(__dirname, 'renderer', 'settings.html'));
+  attachConsoleForward(setWin, 'settings');
+  setWin.on('closed', () => { setWin = null; });
+}
+
+// 自绘标题栏窗口控制(仅设置窗口自身可调用)
+ipcMain.on('win-ctrl', (e, action) => {
+  if (!setWin || setWin.isDestroyed() || e.sender !== setWin.webContents) return;
+  if (action === 'minimize') setWin.minimize();
+  else if (action === 'close') setWin.close();
+});
+
+ipcMain.handle('cfg-get', () => ({
+  glass: !!cfg.glass,
+  dlyr: !!cfg.dlyr,
+  autostart: app.getLoginItemSettings().openAtLogin,
+  lyrics: cfg.lyrics || 'race',
+  fsHide: cfg.fsHide !== false,
+  bilingual: cfg.bilingual !== false,
+}));
+
+ipcMain.handle('cfg-set', (_e, key, val) => {
+  if (key === 'glass') {
+    cfg.glass = !!val;
+    saveCfg();
+    send('glass-changed', cfg.glass);
+  } else if (key === 'dlyr') {
+    cfg.dlyr = !!val;
+    saveCfg();
+    if (cfg.dlyr) ensureDlyrics(); else closeDlyrics();
+  } else if (key === 'autostart') {
+    app.setLoginItemSettings({ openAtLogin: !!val });
+  } else if (key === 'lyrics') {
+    if (['race', 'quality', 'netease', 'qq', 'kugou', 'soda'].includes(val)) {
+      cfg.lyrics = val;
+      saveCfg();
+    }
+  } else if (key === 'bilingual') {
+    cfg.bilingual = !!val;
+    saveCfg();
+    send('bilingual-changed', cfg.bilingual);
+  } else if (key === 'fsHide') {
+    cfg.fsHide = !!val;
+    saveCfg();
+    // 关闭功能时若正因全屏隐藏, 立即恢复显示
+    if (!cfg.fsHide && hiddenByFs) {
+      hiddenByFs = false;
+      if (!hiddenByUser && win && !win.isDestroyed()) win.showInactive();
+    }
+  }
+  return {
+    glass: !!cfg.glass,
+    dlyr: !!cfg.dlyr,
+    autostart: app.getLoginItemSettings().openAtLogin,
+    lyrics: cfg.lyrics || 'race',
+    fsHide: cfg.fsHide !== false,
+  };
+});
+
+ipcMain.handle('stats-get', () => JSON.parse(JSON.stringify(stats)));
+
+// ---------------------------------------------------------------- 歌词获取(主进程绕过 CORS)
+// 多源并发: 网易云 / QQ音乐 / 酷狗。策略 cfg.lyrics:
+//   race    并发竞速, 任一源校验通过立即采用(默认, 最快)
+//   quality 等全部源完成, 按"末句时间戳 vs 曲目时长"偏差择优(最准)
+//   netease|qq|kugou  仅使用指定单源
+const lyrCache = new Map();
+
+function parseLrc(text) {
+  const out = [];
+  for (const ln of String(text || '').split(/\r?\n/)) {
+    const times = [];
+    const re = /\[(\d+):(\d+)(?:[.:](\d+))?\]/g;
+    let m;
+    while ((m = re.exec(ln))) {
+      const cs = m[3] ? parseInt(m[3].padEnd(2, '0').slice(0, 2), 10) : 0;
+      times.push(parseInt(m[1], 10) * 60 + parseInt(m[2], 10) + cs / 100);
+    }
+    const txt = ln.replace(/\[[^\]]*\]/g, '').trim();
+    if (!txt || !times.length) continue;
+    if (/^(作词|作詞|作曲|编曲|編曲|制作|製作|歌词|歌詞|演唱|和声|混音|母带)/.test(txt)) continue;
+    if (txt === '//') continue; // QQ 翻译轨的空占位行
+    for (const t of times) out.push({ t, x: txt });
+  }
+  return out.sort((a, b) => a.t - b.t).slice(0, 500);
+}
+
+// QQ/酷狗返回 base64 歌词, 兼容明文
+function maybeB64(s) {
+  if (typeof s !== 'string' || !s) return '';
+  if (s.includes('[')) return s;
+  try {
+    const d = Buffer.from(s, 'base64').toString('utf8');
+    if (d.includes('[')) return d;
+  } catch { }
+  return s;
+}
+
+function validateLines(lines, duration) {
+  if (!lines || !lines.length) return false;
+  if (!(duration > 0)) return true;
+  return Math.abs(lines[lines.length - 1].t - duration) < 15;
+}
+
+// 繁→简归一化表: 港台歌曲元数据常用繁体 (token = 繁体+简体)
+const T2S_PAIRS = '萬万 與与 專专 業业 叢丛 東东 絲丝 丟丢 兩两 嚴严 喪丧 臨临 麗丽 舉举 鄉乡 買买 賣卖 亂乱 於于 雲云 ' +
+  '電电 億亿 從从 優优 會会 傳传 兒儿 亞亚 國国 圓圆 圍围 圖图 團团 報报 場场 錯错 個个 這这 對对 開开 ' +
+  '間间 門门 關关 來来 後后 現现 見见 聽听 說说 語语 讀读 寫写 樂乐 聲声 體体 點点 廣广 車车 ' +
+  '馬马 鳥鸟 龍龙 鳳凤 愛爱 戀恋 網网 給给 幾几 當当 實实 態态 藝艺 節节 衛卫 廠厂 緣缘 範范 慣惯 劇剧 ' +
+  '歷历 歲岁 豐丰 烏乌 無无 雙双 歡欢 齊齐 橋桥 樹树 機机 權权 壓压 標标 樣样 樓楼 櫻樱 檸柠 條条 ' +
+  '夢梦 殼壳 壞坏 塵尘 傷伤 價价 儀仪 園园 壇坛 塊块 處处 補补 裝装 視视 覺觉 覽览 親亲 壽寿 尋寻 ' +
+  '導导 層层 屬属 義义 燦灿 煙烟 燈灯 熱热 營营 爺爷 獨独 獲获 獅狮 獻献 環环 異异 疊叠 療疗 盜盗 盤盘 ' +
+  '眾众 確确 禮礼 種种 積积 稱称 穀谷 窮穷 筆笔 籌筹 簡简 簽签 類类 糧粮 絕绝 維维 綱纲 總总 ' +
+  '縱纵 縮缩 織织 繼继 續续 蘋苹 號号 蠟蜡 裡里 廢废 強强 戲戏 護护 嘗尝 憶忆 懷怀 擔担 掛挂 擁拥 ' +
+  '摯挚 擊击 據据 擬拟 攝摄 敵敌 斷断 時时 晉晋 暢畅 殺杀 棄弃 極极 構构 樞枢 欄栏 漢汉 潑泼 ' +
+  '澤泽 牆墙 壯壮 薦荐 術术 觸触 計计 訊讯 認认 討讨 讓让 論论 訪访 設设 許许 詞词 試试 該该 詳详 ' +
+  '誤误 調调 誰谁 課课 談谈 請请 講讲 謝谢 譜谱 識识 譽誉 貝贝 財财 負负 責责 貴贵 費费 貼贴 資资 贊赞 趙趙 ' +
+  '趕赶 蹟迹 軌轨 軍军 軟软 輕轻 載载 較较 輛辆 輪轮 轉转 轟轰 辦办 邊边 達达 運运 過过 違违 連连 遠远 適适 遲迟 ' +
+  '遷迁 選选 遺遗 鄧邓 鄭郑 醫医 釋释 鋪铺 鎮镇 鏡镜 長长 閃闪 閉闭 閒闲 隊队 階阶 際际 雞鸡 難难 霧雾 靜静 ' +
+  '韓韩 頁页 頂顶 項项 順顺 須须 預预 領领 頻频 題题 顏颜 願愿 顧顾 飛飞 飢饥 飯饭 飲饮 飾饰 飽饱 飼饲 餘余 館馆 ' +
+  '餵喂 馬马 馭驭 駐驻 駕驾 驗验 驚惊 驕骄 髮发 鬥斗 鬧闹 鮮鲜 鳥鸟 鴉鸦 鳴鸣 鶴鹤 龐庞 龜龟 頭头 劉刘 ' +
+  '陳陈 楊杨 黃黄 張张 吳吴 孫孙 鄺邺 龔龚 們们 對对 没沒 經经 給给 慣惯 廳厅 區区 灭滅 润潤 浅淺 满滿 ' +
+  '渐漸 渊淵 温溫 沟溝 洁潔 涨漲 渔漁 游遊 滨濱 滚滾 滤濾 滩灘 灾災 炉爐 炼煉 炽熾 烂爛 烦煩 烧燒 焕煥 馋饞 颤顫 ' +
+  '脏臟 脑腦 腾騰 舰艦 艰艱 艺藝 节節 苏蘇 荣榮 药藥 萧蕭 蒋蔣 弹彈 缤缤 纷纷 荣榮 灭滅 润潤 单单 弹彈 ' +
+  '倫伦 傑杰 捲卷 媽妈 紅红 純纯 級级 約约 納纳 細细 編编 綠绿 縣县 联聯 誠诚 讚赞 賴赖 貓猫 驱驅 靈灵 ' +
+  '戰战 競竞 築筑 檔档 監监 償偿 嬌娇 懸悬 曬晒 鬆松 麵面 麼么 罷罢 顆颗 響响 懶懒 藥药 蕭萧 聶聂 涛濤 ' +
+  '曉晓 瀟潇 寶宝 藍蓝 羅罗 綺绮 鴻鸿 輯辑 銷销 彈弹 繽缤 滅灭 潤润 淺浅 滿满 漸渐 淵渊 溫溫 溝溝 潔洁 漲涨 ' +
+  '漁渔 遊游 濱滨 滾滚 濾滤 灘滩 災灾 爐炉 煉炼 熾炽 爛爛 煩烦 燒烧 煥焕 饞馋 顫颤 臟脏 腦脑 騰腾 艦舰 艰艰 ' +
+  '蔣蒋 帳帐 幫帮 幹干 莊庄 慶庆 庫库 應应 廟庙 寬宽 審审 憲宪 寢寝 豈岂 崗岗 嶺岭 屢屡 畢毕 匯汇 瀝沥 ' +
+  '僅仅 僕仆 農农 況况 凍冻 淨净 淒凄 準准 減减 憑凭 凱凯 劃划 剛刚 創创 劑剂 劍剑 剝剥 勸劝 務务 動动 ' +
+  '勵励 勞劳 勢势 勳勋 勻匀 區区 協协 厲厉 厭厌 廁厕 釐厘 參参 葉叶 嘆叹 嚇吓 呂吕 嗎吗 噸吨 嗚呜 員员 ' +
+  '囉啰 嘯啸 囑嘱 喬乔 撥拨 擇择 攏拢 攔拦 攤摊 撐撑 話话 風风 譯译 週周 億亿 億亿';
+
+const T2S = new Map();
+for (const p of T2S_PAIRS.split(' ')) {
+  if (p.length === 2) T2S.set(p[0], p[1]);
+}
+
+// 标题/歌手归一化: 繁→简 + 全角→半角 + 去空白标点 + 小写。
+// 让 繁体元数据/全角字符 与简体平台数据可匹配
+function normTitle(s) {
+  let r = '';
+  for (const ch of String(s || '')) {
+    let c = T2S.get(ch) || ch;
+    const code = c.charCodeAt(0);
+    if (code >= 0xFF01 && code <= 0xFF5E) c = String.fromCharCode(code - 0xFEE0);
+    else if (code === 0x3000) c = ' ';
+    r += c;
+  }
+  return r.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+}
+
+// 标题相似度 0~1: 完全相等 1, 包含关系 0.85, 否则取 bigram 骰子系数。
+// bigram 对短标题/换序标题区分度远高于单字重合('爱你'vs'你爱'→0, 'Run'vs'Sun'→0.5)
+function titleScore(a, b) {
+  const na = normTitle(a), nb = normTitle(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+  if (na.includes(nb) || nb.includes(na)) return 0.85;
+  if (na.length < 2 || nb.length < 2) return 0;
+  const grams = new Set();
+  for (let i = 0; i < na.length - 1; i++) grams.add(na.slice(i, i + 2));
+  let hit = 0;
+  for (let i = 0; i < nb.length - 1; i++) {
+    const g = nb.slice(i, i + 2);
+    if (grams.has(g)) { hit++; grams.delete(g); }
+  }
+  return (2 * hit) / (na.length - 1 + nb.length - 1);
+}
+
+function artistMatch(candArtist, artist) {
+  const a = normTitle(candArtist), b = normTitle(artist);
+  if (!a || !b) return false;
+  return a.includes(b) || b.includes(a);
+}
+
+// 歌手相似度: bigram 骰子系数(短字符串区分度远高于单字重合率)
+// 'Another Band' vs 'Miatriss' → 0.0, 而 'Miatriss & X' vs 'Miatriss' → ~0.87
+function artistScore(a, b) {
+  const na = normTitle(a), nb = normTitle(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+  if (na.includes(nb) || nb.includes(na)) return 0.85;
+  if (na.length < 2 || nb.length < 2) return 0;
+  const grams = new Set();
+  for (let i = 0; i < na.length - 1; i++) grams.add(na.slice(i, i + 2));
+  let hit = 0;
+  for (let i = 0; i < nb.length - 1; i++) {
+    const g = nb.slice(i, i + 2);
+    if (grams.has(g)) { hit++; grams.delete(g); }
+  }
+  return (2 * hit) / (na.length - 1 + nb.length - 1);
+}
+
+// 候选时长得分: 元数据时长经常不准, 只作加权不作硬门(差>25s 视为垃圾数据淘汰)
+function candDurScore(cd, duration) {
+  if (!(duration > 0) || !(cd > 0)) return 0;
+  const d = Math.abs(cd - duration);
+  if (d <= 3) return 0.2;
+  if (d <= 10) return 0.15;
+  if (d <= 20) return 0.1;
+  return 0;
+}
+function hasCJKScript(s) { return /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(s || ''); }
+function hasLatinScript(s) { return /[a-zA-Z]/.test(s || ''); }
+
+// 候选排序与过滤(加权评分, 分级接受):
+//   标题 ts>=0.55; 综合分 = ts + 歌手分*0.45 + 时长分, 需 >=1.0 且 ts>=0.6
+//   歌手硬门槛 as>=0.35; 灰区 0.25~0.35 需时长差<=3s;
+//   跨语言歌手(一方CJK一方拉丁, as<0.2): 时长差<=6s 且标题>=0.8 时放行
+//   SMTC 无歌手信息: 仅要求标题 >= 0.75
+function rankCands(rawList, title, artist, duration, nameOf, artistOf, durOf) {
+  return rawList
+    .map((s) => {
+      const ts = titleScore(nameOf(s), title);
+      if (ts < 0.55) return null;
+      const cd = durOf ? durOf(s) : 0;
+      const dAbs = (duration > 0 && cd > 0) ? Math.abs(cd - duration) : null;
+      if (dAbs !== null && dAbs > 25) return null; // 垃圾元数据
+
+      const candArtist = artistOf(s);
+      const as = artist ? artistScore(candArtist, artist) : 0.6;
+      if (artist) {
+        let baseOK = as >= 0.35;
+        if (!baseOK && as >= 0.25 && dAbs !== null && dAbs <= 3) baseOK = true;
+        if (!baseOK && as < 0.2 && dAbs !== null && dAbs <= 3 && ts >= 0.85 &&
+            hasCJKScript(candArtist) !== hasCJKScript(artist) &&
+            (hasCJKScript(candArtist) || hasCJKScript(artist)) &&
+            (hasLatinScript(candArtist) !== hasLatinScript(artist))) {
+          baseOK = true; // 跨语言歌手名变体(如 罗马字 vs 原文), 需近同时长+高标题分
+        }
+        if (!baseOK) return null;
+      }
+
+      const score = ts + as * 0.45 + candDurScore(cd, duration);
+      if (score < 1.0) return null;
+      if (artist ? ts < 0.6 : ts < 0.75) return null;
+      return { s, score };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score)
+    .map((c) => c.s);
+}
+
+async function httpJson(url, headers, signal) {
+  const res = await fetch(url, { signal, headers: headers || {} });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+function withTimeout(promise, ms) {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => resolve(null), ms);
+    promise.then((v) => { clearTimeout(t); resolve(v); }, () => { clearTimeout(t); resolve(null); });
+  });
+}
+
+const H_UA = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' };
+
+async function srcNetease(query) {
+  const { title, artist, duration } = query;
+  const ac = new AbortController();
+  const tm = setTimeout(() => ac.abort(), 7500);
+  try {
+    const h = { ...H_UA, 'Referer': 'https://music.163.com/' };
+    const attempt = async (kw) => {
+      const q = encodeURIComponent(kw);
+      const sr = await httpJson(`https://music.163.com/api/search/get/web?s=${q}&type=1&offset=0&limit=5`, h, ac.signal);
+      const songs = (sr && sr.result && sr.result.songs) || [];
+      const durOf = (s) => (s.duration && s.duration > 0) ? s.duration / 1000 : 0;
+      const cands = rankCands(songs, title, artist, duration,
+        (s) => s.name, (s) => (s.artists || []).map((a) => a.name).join('/'), durOf);
+      for (const s of cands) {
+        try {
+          const lr = await httpJson(`https://music.163.com/api/song/lyric?os=pc&id=${s.id}&lv=-1&kv=-1&tv=-1`, h, ac.signal);
+          const lines = parseLrc(lr && lr.lrc && lr.lrc.lyric);
+          if (validateLines(lines, duration)) {
+            const trans = parseLrc(lr && lr.tlyric && lr.tlyric.lyric);
+            return { lines, dur: durOf(s), trans };
+          }
+        } catch { }
+      }
+      // 歌词未命中也回传候选时长: 无时间轴播放器(网易云)需用它做进度基准
+      return { lines: null, dur: cands.length ? durOf(cands[0]) : 0, trans: [] };
+    };
+    const r1 = await attempt(`${title} ${artist}`.trim());
+    if (r1.lines) return r1;
+    // 回退: 歌手名干扰匹配时仅用标题重搜
+    if (artist) {
+      const r2 = await attempt(title);
+      if (r2.lines) return r2;
+      return { lines: null, dur: r1.dur || r2.dur || 0, trans: r1.trans || r2.trans || [] };
+    }
+    return r1;
+  } catch { return null; } finally { clearTimeout(tm); }
+}
+
+async function srcQQ(query) {
+  const { title, artist, duration } = query;
+  const ac = new AbortController();
+  const tm = setTimeout(() => ac.abort(), 7500);
+  try {
+    const h = { ...H_UA, 'Referer': 'https://y.qq.com/' };
+    const attempt = async (kw) => {
+      const q = encodeURIComponent(kw);
+      const sr = await httpJson(`https://c.y.qq.com/soso/fcgi-bin/client_search_cp?w=${q}&format=json&n=5`, h, ac.signal);
+      const list = (sr && sr.data && sr.data.song && sr.data.song.list) || [];
+      const cands = rankCands(list, title, artist, duration,
+        (s) => s.songname || s.name, (s) => (s.singer || []).map((a) => a.name).join('/'),
+        (s) => s.interval || 0);
+      for (const s of cands) {
+        try {
+          const mid = s.songmid || s.mid;
+          if (!mid) continue;
+          // GetPlayLyricInfo: 老版 fcg_query_lyric_new 接口的 trans 字段已恒为空,
+          // 翻译需走 musicu.fcg 的 PlayLyricInfo 模块 (isFormat:false 时 lyric/trans 为 base64)
+          const lr = await httpJson(`https://u.y.qq.com/cgi-bin/musicu.fcg?format=json&data=${encodeURIComponent(JSON.stringify({
+            comm: { ct: 19, cv: 1873, uin: '' },
+            req_1: {
+              module: 'music.musichallSong.PlayLyricInfo',
+              method: 'GetPlayLyricInfo',
+              param: { songMID: mid, songID: 0, isFormat: false, trans: 1 },
+            },
+          }))}`, h, ac.signal);
+          const d = lr && lr.req_1 && lr.req_1.data;
+          const lines = parseLrc(maybeB64(d && d.lyric));
+          if (validateLines(lines, duration)) {
+            const trans = parseLrc(maybeB64(d && d.trans));
+            return { lines, dur: s.interval || 0, trans };
+          }
+        } catch { }
+      }
+      return { lines: null, dur: cands.length ? (cands[0].interval || 0) : 0, trans: [] };
+    };
+    const r1 = await attempt(`${title} ${artist}`.trim());
+    if (r1.lines) return r1;
+    if (artist) {
+      const r2 = await attempt(title);
+      if (r2.lines) return r2;
+      return { lines: null, dur: r1.dur || r2.dur || 0, trans: r1.trans || r2.trans || [] };
+    }
+    return r1;
+  } catch { return null; } finally { clearTimeout(tm); }
+}
+
+// ---------------------------------------------------------------- 汽水音乐本地歌词缓存源
+// 汽水(SodaMusic)的曲目详情接口有原生层签名风控, 无法直接请求;
+// 但客户端会把已播放曲目的完整详情(含逐字歌词/翻译)缓存到本地 LMDB
+// (LunaCacheV2/entries.db), 此处直接读取并按标题/歌手/时长匹配。
+// 仅在汽水正在播放的场景可用(缓存由汽水自己写入), 其余场景返回空。
+// 注意: LMDB 只读句柄打开即快照, 每次查找都重新打开以读到新写入的缓存。
+function readSodaCatalog() {
+  let lmdb;
+  try { lmdb = require('lmdb'); } catch { return []; }
+  const dbPath = path.join(os.homedir(), 'AppData', 'Roaming', 'SodaMusic', 'LunaCacheV2', 'entries.db');
+  let db = null;
+  try { db = lmdb.open({ path: dbPath, readOnly: true }); } catch { return []; }
+  const out = [];
+  try {
+    for (const { value } of db.getRange()) {
+      try {
+        if (!value || typeof value !== 'object') continue;
+        const md = value.info && value.info.mediaDetail;
+        if (!md) continue;
+        const resp = md.response;
+        const tr = resp && resp.track;
+        const lyr = (resp && resp.lyric) || md.lyrics;
+        if (!tr || !tr.name || !lyr || !lyr.content) continue;
+        out.push({
+          name: tr.name,
+          artists: (Array.isArray(tr.artists) ? tr.artists : []).map((a) => a.name || '').filter(Boolean).join('/'),
+          dur: (tr.duration && tr.duration > 0) ? tr.duration / 1000 : 0,
+          c: lyr.content,
+          t: (lyr.translations && lyr.translations.cn) || '',
+        });
+      } catch { }
+    }
+  } catch { }
+  try { db.close(); } catch { }
+  return out;
+}
+
+// 汽水歌词行格式: KRC 逐字 [startMs,durMs]<relStart,relDur,0>词 <...>...
+// 兼容普通 LRC 行 [mm:ss.xx]文本
+function parseSodaContent(text) {
+  const out = [];
+  const lrcRest = [];
+  for (const ln of String(text || '').split(/\r?\n/)) {
+    const m = /^\[(\d+),(\d+)\]/.exec(ln);
+    if (m) {
+      const x = ln.replace(/^\[[^\]]*\]/, '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+      if (x) out.push({ t: parseInt(m[1], 10) / 1000, x });
+    } else {
+      lrcRest.push(ln);
+    }
+  }
+  if (lrcRest.length) out.push(...parseLrc(lrcRest.join('\n')));
+  return out.sort((a, b) => a.t - b.t).slice(0, 500);
+}
+
+async function srcSoda(query) {
+  const { title, artist, duration } = query;
+  const cats = readSodaCatalog();
+  if (!cats.length) return null;
+  const cands = rankCands(cats, title, artist, duration,
+    (t) => t.name, (t) => t.artists, (t) => t.dur);
+  // 元数据候选已经过 rankCands 精确校验(即汽水正在播的曲目),
+  // 末句时间不必紧贴曲尾(电音 outro 很长), 只做宽松防护
+  const softValid = (lines) => lines.length &&
+    !(duration > 0 && Math.abs(lines[lines.length - 1].t - duration) > 60);
+  for (const t of cands) {
+    const lines = parseSodaContent(t.c);
+    if (softValid(lines)) {
+      const trans = t.t ? parseLrc(t.t) : [];
+      return { lines, dur: t.dur || 0, trans };
+    }
+  }
+  // 元数据命中但歌词校验未过: 仍回传时长与翻译兜底
+  if (cands.length) {
+    const t = cands[0];
+    return { lines: null, dur: t.dur || 0, trans: t.t ? parseLrc(t.t) : [] };
+  }
+  return null;
+}
+
+async function srcKugou(query) {
+  const { title, artist, duration } = query;
+  const ac = new AbortController();
+  const tm = setTimeout(() => ac.abort(), 8000);
+  try {
+    const attempt = async (kw) => {
+      const q = encodeURIComponent(kw);
+      const sr = await httpJson(`http://mobilecdn.kugou.com/api/v3/search/song?format=json&keyword=${q}&page=1&pagesize=5`, H_UA, ac.signal);
+      const list = (sr && sr.data && sr.data.info) || [];
+      const cands = rankCands(list, title, artist, duration,
+        (s) => s.songname, (s) => s.singername,
+        (s) => s.duration || 0);
+      for (const s of cands) {
+        try {
+          if (!s.hash) continue;
+          const cs = await httpJson(
+            `https://krcs.kugou.com/search?ver=1&man=yes&client=mobi&hash=${s.hash}&album_audio_id=${s.album_audio_id || ''}`,
+            H_UA, ac.signal);
+          const cand = cs && cs.candidates && cs.candidates[0];
+          if (!cand || !cand.id) continue;
+          const aKey = cand.accesskey || cand.access_key || '';
+          const dl = await httpJson(
+            `https://lyrics.kugou.com/download?ver=1&client=pc&id=${cand.id}&accesskey=${aKey}&fmt=lrc&charset=utf8`,
+            H_UA, ac.signal);
+          const lines = parseLrc(maybeB64(dl && dl.content));
+          if (validateLines(lines, duration)) return { lines, dur: s.duration || 0, trans: [] };
+        } catch { }
+      }
+      return { lines: null, dur: cands.length ? (cands[0].duration || 0) : 0, trans: [] };
+    };
+    const r1 = await attempt(`${title} ${artist}`.trim());
+    if (r1.lines) return r1;
+    if (artist) {
+      const r2 = await attempt(title);
+      if (r2.lines) return r2;
+      return { lines: null, dur: r1.dur || r2.dur || 0, trans: r1.trans || r2.trans || [] };
+    }
+    return r1;
+  } catch { return null; } finally { clearTimeout(tm); }
+}
+
+const LYRIC_SOURCES = [
+  // soda(本地缓存)放在首位: 读取即返回, 竞速下天然优先, 且与汽水播放内容精确一致
+  { id: 'soda', fn: srcSoda },
+  { id: 'netease', fn: srcNetease },
+  { id: 'qq', fn: srcQQ },
+  { id: 'kugou', fn: srcKugou },
+];
+
+async function fetchLyrics(query) {
+  const { title, artist, duration } = query || {};
+  if (!title) return { lines: [], src: '' };
+  const key = (title + '|' + artist).toLowerCase();
+  if (lyrCache.has(key)) return lyrCache.get(key);
+
+  const finish = (lines, src, dur, trans) => {
+    const r = { lines: lines || [], src: src || '', dur: dur || 0, trans: trans || [] };
+    lyrCache.set(key, r);
+    if (lines && lines.length) {
+      // 日志 ASCII 转义: 终端代码页不一致时也不会显示乱码
+      const safe = String(title).replace(/[^\x20-\x7E]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
+      console.log(`[lyrics] "${safe}" <- ${src || strat}${r.dur ? ' (' + Math.round(r.dur) + 's)' : ''}${r.trans.length ? ' +trans' : ''}`);
+    }
+    return r;
+  };
+
+  const raw = cfg.lyrics || 'race';
+  const strat = ['race', 'quality', 'netease', 'qq', 'kugou', 'soda'].includes(raw) ? raw : 'race';
+
+  // 单源模式
+  if (strat !== 'race' && strat !== 'quality') {
+    const def = LYRIC_SOURCES.find((s) => s.id === strat) || LYRIC_SOURCES[0];
+    const r = await withTimeout(Promise.resolve().then(() => def.fn({ title, artist, duration })), 9000);
+    return finish(r && r.lines, r && r.lines && r.lines.length ? strat : '', r && r.dur, r && r.trans);
+  }
+
+  // 并发全部源
+  const ps = LYRIC_SOURCES.map((s) =>
+    withTimeout(Promise.resolve().then(() => s.fn({ title, artist, duration })), 9000)
+      .then((r) => r ? {
+        lines: (r.lines && r.lines.length) ? r.lines : [],
+        src: (r.lines && r.lines.length) ? s.id : '',
+        dur: r.dur || 0,
+        trans: r.trans || [],
+      } : null));
+
+  if (strat === 'race') {
+    return new Promise((resolve) => {
+      let pending = ps.length, done = false, bestDur = 0, bestTrans = [];
+      ps.forEach((p) => p.then((r) => {
+        if (r) {
+          if (r.dur > bestDur) bestDur = r.dur;
+          if (r.trans && r.trans.length && !bestTrans.length) bestTrans = r.trans;
+        }
+        if (!done && r && r.lines.length) { done = true; resolve(finish(r.lines, r.src, r.dur, r.trans)); }
+        if (--pending === 0 && !done) { done = true; resolve(finish([], '', bestDur, bestTrans)); }
+      }));
+    });
+  }
+
+  // quality: 等全部完成, 按末句与曲目时长偏差择优, 同分按源优先级
+  const rs = await Promise.all(ps);
+  let bestDur = 0, bestTrans = [];
+  rs.forEach((r) => {
+    if (!r) return;
+    if (r.dur > bestDur) bestDur = r.dur;
+    if (r.trans && r.trans.length && !bestTrans.length) bestTrans = r.trans;
+  });
+  let best = null, bestScore = Infinity, bestIdx = Infinity;
+  rs.forEach((r, i) => {
+    if (!r || !r.lines.length) return;
+    const last = r.lines[r.lines.length - 1].t;
+    const score = (duration > 0) ? Math.abs(last - duration) : 1000 + i * 10;
+    if (score < bestScore || (score === bestScore && i < bestIdx)) { best = r; bestScore = score; bestIdx = i; }
+  });
+  return best ? finish(best.lines, best.src, best.dur, best.trans) : finish([], '', bestDur, bestTrans);
+}
+ipcMain.handle('fetch-lyrics', (_e, q) => fetchLyrics(q || {}).catch(() => ({ lines: [], src: '' })));
+
+// 桌面歌词窗口
+let dlWin = null;
+function ensureDlyrics() {
+  if (dlWin && !dlWin.isDestroyed()) return;
+  dlWin = new BrowserWindow({
+    width: 1000, height: 120,
+    frame: false, transparent: true, resizable: false, movable: false,
+    focusable: false, skipTaskbar: true, alwaysOnTop: true, hasShadow: false,
+    show: false,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
+  });
+  dlWin.setAlwaysOnTop(true, 'screen-saver');
+  try { dlWin.setVisibleOnAllWorkspaces(true); } catch { }
+  dlWin.setIgnoreMouseEvents(true);
+  dlWin.loadFile(path.join(__dirname, 'renderer', 'dlyrics.html'));
+  attachConsoleForward(dlWin, 'dlyr');
+  positionDlyrics();
+  dlWin.once('ready-to-show', () => { dlWin.showInactive(); keepOnTop(); });
+}
+function positionDlyrics() {
+  if (!dlWin || dlWin.isDestroyed()) return;
+  const { workArea } = screen.getPrimaryDisplay();
+  dlWin.setPosition(
+    Math.round(workArea.x + (workArea.width - 1000) / 2),
+    workArea.y + workArea.height - 140,
+    false
+  );
+}
+function closeDlyrics() {
+  try { if (dlWin && !dlWin.isDestroyed()) dlWin.destroy(); } catch { }
+  dlWin = null;
+}
+
+ipcMain.on('desktop-lyric', (_e, payload) => {
+  if (!cfg.dlyr) return;
+  ensureDlyrics();
+  if (dlWin && !dlWin.isDestroyed()) dlWin.webContents.send('dl-line', payload || { x: '', s: '' });
+});
+
+// ---------------------------------------------------------------- 托盘
+function createTray() {
+  const iconPath = path.join(__dirname, 'assets', 'tray.png');
+  let icon = nativeImage.createFromPath(iconPath);
+  if (icon.isEmpty()) icon = nativeImage.createEmpty();
+  tray = new Tray(icon);
+  tray.setToolTip('MediaIsle');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: '显示 / 隐藏岛体', click: () => {
+      if (!win || win.isDestroyed()) return;
+      if (win.isVisible()) { hiddenByUser = true; win.hide(); }
+      else { hiddenByUser = false; hiddenByFs = false; win.showInactive(); keepOnTop(); }
+    } },
+    { type: 'separator' },
+    { label: '设置...', click: () => createSettingsWindow() },
+    { label: '切换静音', click: () => sendCommand('toggle-mute') },
+    { type: 'separator' },
+    { label: '退出', click: () => { app.isQuitting = true; app.quit(); } },
+  ]));
+}
+
+// ---------------------------------------------------------------- 生命周期
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => { /* 已在运行, 忽略 */ });
+
+  app.whenReady().then(() => {
+    // 清理上次运行遗留的命令文件; 错误日志超 256KB 轮转
+    try { fs.rmSync(CMD_FILE, { force: true }); fs.rmSync(CMD_TMP, { force: true }); } catch { }
+    try { if (fs.statSync(LOG_FILE).size > 262144) fs.rmSync(LOG_FILE, { force: true }); } catch { }
+    createWindow();
+    startBridge();
+    createTray();
+    if (cfg.dlyr) ensureDlyrics();
+    screen.on('display-metrics-changed', positionDlyrics);
+  });
+
+  app.on('window-all-closed', () => {
+    app.quit();
+  });
+
+  app.on('before-quit', () => {
+    app.isQuitting = true;
+  });
+
+  app.on('will-quit', () => {
+    try { if (bridge) bridge.kill(); } catch { }
+    try { fs.rmSync(CMD_FILE, { force: true }); fs.rmSync(CMD_TMP, { force: true }); } catch { }
+    closeDlyrics();
+    try { if (tray) tray.destroy(); } catch { }
+    try { fs.writeFileSync(CFG_FILE, JSON.stringify(cfg)); } catch { }
+    try { fs.writeFileSync(STATS_FILE, JSON.stringify(stats)); } catch { }
+  });
+}

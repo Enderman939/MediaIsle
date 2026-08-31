@@ -1,0 +1,25 @@
+# 依赖与构建产物
+node_modules/
+
+# 误放的无关目录
+android/
+
+# 日志与临时文件
+*.log
+*.tmp
+fastmusic-island-cmd.json
+fastmusic-island-cmd.json.tmp
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 会话记录
+session-*.md
+
+# AI ����Ŀ¼
+.claude/
+.agents/
+skills-lock.json

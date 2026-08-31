@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'">
+  <title>MediaIsle</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="stage">
+    <div id="island" data-state="idle">
+
+      <!-- 迷你态: 无媒体时常驻小胶囊 -->
+      <div class="face face-idle">
+        <svg class="ic-note" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="8.6" cy="17.4" r="3.9"></circle>
+          <rect x="11.4" y="4.6" width="2.1" height="13" rx="1.05"></rect>
+          <path d="M13.5 4.6c3.3 1 5.2 3.1 5.2 6 0 1.7-.9 3-2.1 3.7.5-1.4.3-3-.8-4.4-1.1-1.4-1.8-1.8-2.3-3.3z"></path>
+        </svg>
+      </div>
+
+      <!-- 紧凑态: 正在播放 -->
+      <div class="face face-compact">
+        <div class="c-art" id="cArt">
+          <img id="cArtImg" alt="" draggable="false">
+          <svg class="ic-note ph" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="8.6" cy="17.4" r="3.9"></circle>
+            <rect x="11.4" y="4.6" width="2.1" height="13" rx="1.05"></rect>
+            <path d="M13.5 4.6c3.3 1 5.2 3.1 5.2 6 0 1.7-.9 3-2.1 3.7.5-1.4.3-3-.8-4.4-1.1-1.4-1.8-1.8-2.3-3.3z"></path>
+          </svg>
+        </div>
+        <div class="c-title" id="cTitleWrap">
+          <div class="marquee-track" id="cMarquee"><span id="cText"></span></div>
+        </div>
+        <div class="eq" id="eq"><i></i><i></i><i></i><i></i></div>
+      </div>
+
+      <!-- 音量态: 系统音量变化时自动弹出 -->
+      <div class="face face-volume">
+        <button class="btn btn-sm v-mute-btn" id="vMuteBtn" title="静音" aria-label="静音">
+          <svg class="ic-vol-on" viewBox="0 0 24 24">
+            <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+          </svg>
+          <svg class="ic-vol-off" viewBox="0 0 24 24">
+            <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+          </svg>
+        </button>
+        <div class="v-bar" id="vBar">
+          <div class="p-track"></div>
+          <div class="p-fill"></div>
+          <div class="p-knob-wrap" id="vKnobWrap"><div class="p-knob" id="vKnob"></div></div>
+        </div>
+      </div>
+
+      <!-- 展开态: 媒体控制面板 -->
+      <div class="face face-expanded">
+        <div class="e-art" id="eArt">
+          <img id="eArtImg" alt="" draggable="false">
+          <svg class="ic-note ph" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="8.6" cy="17.4" r="3.9"></circle>
+            <rect x="11.4" y="4.6" width="2.1" height="13" rx="1.05"></rect>
+            <path d="M13.5 4.6c3.3 1 5.2 3.1 5.2 6 0 1.7-.9 3-2.1 3.7.5-1.4.3-3-.8-4.4-1.1-1.4-1.8-1.8-2.3-3.3z"></path>
+          </svg>
+          <button class="btn-fav" id="btnFav" title="收藏" aria-label="收藏">
+            <svg id="icFavOff" viewBox="0 0 24 24">
+              <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+            </svg>
+            <svg id="icFavOn" viewBox="0 0 24 24" class="hidden">
+              <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+            </svg>
+          </button>
+        </div>
+        <div class="e-main">
+          <div class="e-title" id="eTitle">未在播放</div>
+          <div class="e-sub" id="eSub"><span id="eArtist"></span><span class="dot" id="eDot">·</span><span id="eAlbum"></span><span class="dot" id="eDotB">·</span><span id="eSource" class="src-link" title="查看收藏列表"></span></div>
+          <div class="e-progress">
+            <div class="p-time" id="tCur">0:00</div>
+            <div class="p-bar" id="pBar">
+              <div class="p-track"></div>
+              <div class="p-fill"></div>
+              <div class="p-knob-wrap" id="pKnobWrap"><div class="p-knob" id="pKnob"></div></div>
+            </div>
+            <div class="p-time right" id="tDur">0:00</div>
+          </div>
+          <div class="e-volume">
+            <button class="btn btn-xs" id="eMuteBtn" title="静音" aria-label="静音">
+              <svg class="ic-vol-on" viewBox="0 0 24 24">
+                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+              </svg>
+              <svg class="ic-vol-off" viewBox="0 0 24 24">
+                <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+              </svg>
+            </button>
+            <div class="p-bar v-slider" id="eVBar">
+              <div class="p-track"></div>
+              <div class="p-fill"></div>
+              <div class="p-knob-wrap" id="eVKnobWrap"><div class="p-knob" id="eVKnob"></div></div>
+            </div>
+          </div>
+          <div class="e-controls">
+            <button class="btn btn-sm" id="btnShuffle" title="随机播放" aria-label="随机播放">
+              <svg viewBox="0 0 24 24" id="icShuffle">
+                <path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm0 16h5.5v-5.5l-2.04 2.04L9.41 4 8 5.41l8.54 8.54L14.5 16H14v2h.5z"/>
+              </svg>
+            </button>
+            <button class="btn" id="btnPrev" title="上一首" aria-label="上一首">
+              <svg viewBox="0 0 26 24">
+                <rect x="3.2" y="5.6" width="2.7" height="12.8" rx="1.35"></rect>
+                <path d="M16.2 5.9 8.4 12l7.8 6.1z"></path>
+                <path d="M24.8 5.9 17 12l7.8 6.1z"></path>
+              </svg>
+            </button>
+            <button class="btn btn-play" id="btnToggle" title="播放/暂停" aria-label="播放/暂停">
+              <svg id="icPlay" viewBox="0 0 24 24">
+                <path d="M7.6 5.2v13.6c0 .83.92 1.34 1.62.9l10.8-6.8a1.06 1.06 0 0 0 0-1.8L9.22 4.3a1.06 1.06 0 0 0-1.62.9z"></path>
+              </svg>
+              <svg id="icPause" viewBox="0 0 24 24" class="hidden">
+                <rect x="6.2" y="5" width="3.5" height="14" rx="1.4"></rect>
+                <rect x="14.3" y="5" width="3.5" height="14" rx="1.4"></rect>
+              </svg>
+            </button>
+            <button class="btn" id="btnNext" title="下一首" aria-label="下一首">
+              <svg viewBox="0 0 26 24">
+                <rect x="20.1" y="5.6" width="2.7" height="12.8" rx="1.35"></rect>
+                <path d="M9.8 5.9 17.6 12 9.8 18.1z"></path>
+                <path d="M1.2 5.9 9 12l-7.8 6.1z"></path>
+              </svg>
+            </button>
+            <button class="btn btn-sm" id="btnRepeat" title="循环模式" aria-label="循环模式">
+              <svg id="icRepeatOff" viewBox="0 0 24 24">
+                <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/>
+              </svg>
+              <svg id="icRepeatOne" viewBox="0 0 24 24" class="hidden">
+                <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/>
+                <path d="M13 15V9h-1l-2 1v1h1.5v4H13z"/>
+              </svg>
+              <svg id="icRepeatAll" viewBox="0 0 24 24" class="hidden">
+                <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/>
+              </svg>
+            </button>
+          </div>
+          <div class="e-foot">
+            <div class="chips" id="srcChips"></div>
+            <div class="stats-txt" id="eStats"></div>
+          </div>
+        </div>
+        <!-- 歌词竖栏: 展开态右侧 -->
+        <div class="e-lyrics" id="eLyrics"><div class="yl-track" id="ylTrack"><div class="yl-line ph">&#9834;</div></div></div>
+      </div>
+
+      <!-- 换歌通知气泡 -->
+      <div class="face face-notify">
+        <div class="n-art" id="nArt">
+          <img id="nArtImg" alt="" draggable="false">
+          <svg class="ic-note ph" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="8.6" cy="17.4" r="3.9"></circle>
+            <rect x="11.4" y="4.6" width="2.1" height="13" rx="1.05"></rect>
+            <path d="M13.5 4.6c3.3 1 5.2 3.1 5.2 6 0 1.7-.9 3-2.1 3.7.5-1.4.3-3-.8-4.4-1.1-1.4-1.8-1.8-2.3-3.3z"></path>
+          </svg>
+        </div>
+        <div class="n-col">
+          <div class="n-title" id="nTitle">正在播放</div>
+          <div class="n-sub" id="nSub"></div>
+        </div>
+      </div>
+
+      <!-- 收藏列表面板 -->
+      <div class="face face-favlist">
+        <div class="fl-head">
+          <button class="btn btn-xs" id="flBack" title="返回" aria-label="返回">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="14,5 7,12 14,19"></polyline>
+            </svg>
+          </button>
+          <div class="fl-title">我的收藏</div>
+          <div class="fl-count" id="flCount"></div>
+        </div>
+        <div class="fl-list" id="flList"></div>
+      </div>
+
+      <!-- 展开态: 无媒体 -->
+      <div class="face face-empty">
+        <svg class="ic-note big" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="8.6" cy="17.4" r="3.9"></circle>
+          <rect x="11.4" y="4.6" width="2.1" height="13" rx="1.05"></rect>
+          <path d="M13.5 4.6c3.3 1 5.2 3.1 5.2 6 0 1.7-.9 3-2.1 3.7.5-1.4.3-3-.8-4.4-1.1-1.4-1.8-1.8-2.3-3.3z"></path>
+        </svg>
+        <div class="empty-text">
+          <div class="empty-t1">当前没有正在播放的媒体</div>
+          <div class="empty-t2">在任意应用中播放音乐，这里会自动显示</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,492 @@
+/* =====================================================================
+   MediaIsle 设置 - Material Design 3 (暗色基线方案)
+   令牌: --md-sys-color-* / --md-sys-typescale-* / --md-sys-shape-* / --md-sys-motion-*
+   组件: Navigation Drawer / List + Switch / Outlined Select / Card / Data Table
+   ===================================================================== */
+
+/* ------------------------------------------------ 令牌 (MD3 baseline dark) */
+:root {
+  /* 颜色 */
+  --md-sys-color-primary: #D0BCFF;
+  --md-sys-color-on-primary: #381E72;
+  --md-sys-color-primary-container: #4F378B;
+  --md-sys-color-on-primary-container: #EADDFF;
+  --md-sys-color-secondary: #CCC2DC;
+  --md-sys-color-on-secondary: #332D41;
+  --md-sys-color-secondary-container: #4A4458;
+  --md-sys-color-on-secondary-container: #E8DEF8;
+  --md-sys-color-tertiary: #EFB8C8;
+  --md-sys-color-tertiary-container: #633B48;
+  --md-sys-color-on-tertiary-container: #FFD8E4;
+  --md-sys-color-error: #F2B8B5;
+  --md-sys-color-on-error: #601410;
+  --md-sys-color-error-container: #8C1D18;
+  --md-sys-color-on-error-container: #F9DEDC;
+  --md-sys-color-surface: #141218;
+  --md-sys-color-on-surface: #E6E0E9;
+  --md-sys-color-on-surface-variant: #CAC4D0;
+  --md-sys-color-surface-container-lowest: #0F0D13;
+  --md-sys-color-surface-container-low: #1D1B20;
+  --md-sys-color-surface-container: #211F26;
+  --md-sys-color-surface-container-high: #2B2930;
+  --md-sys-color-surface-container-highest: #36343B;
+  --md-sys-color-surface-dim: #141218;
+  --md-sys-color-surface-bright: #3B383E;
+  --md-sys-color-outline: #938F99;
+  --md-sys-color-outline-variant: #49454F;
+  --md-sys-color-inverse-surface: #E6E0E9;
+  --md-sys-color-inverse-on-surface: #322F35;
+  --md-sys-color-inverse-primary: #6750A4;
+
+  /* 字体引用: 桌面端离线可用字栈 (MD3 Plain Typeface 角色) */
+  --md-ref-typeface-plain: 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+
+  /* 字体规格 (尺寸/行高/字重/字距按 MD3 Type Scale) */
+  --ts-headline-small: 400 24px/32px var(--md-ref-typeface-plain);
+  --ts-title-medium: 500 16px/24px var(--md-ref-typeface-plain);
+  --ts-title-small: 500 14px/20px var(--md-ref-typeface-plain);
+  --ts-body-large: 400 16px/24px var(--md-ref-typeface-plain);
+  --ts-body-medium: 400 14px/20px var(--md-ref-typeface-plain);
+  --ts-body-small: 400 12px/16px var(--md-ref-typeface-plain);
+  --ts-label-large: 500 14px/20px var(--md-ref-typeface-plain);
+  --ts-label-medium: 500 12px/16px var(--md-ref-typeface-plain);
+
+  /* 形状 */
+  --md-sys-shape-corner-extra-small: 4px;
+  --md-sys-shape-corner-small: 8px;
+  --md-sys-shape-corner-medium: 12px;
+  --md-sys-shape-corner-large: 16px;
+  --md-sys-shape-corner-full: 9999px;
+
+  /* 动效 (MD3 Easing / Duration) */
+  --md-sys-motion-easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-duration-short4: 200ms;
+  --md-sys-motion-duration-medium1: 250ms;
+  --md-sys-motion-duration-medium2: 300ms;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: var(--md-sys-color-surface);
+  overflow: hidden;
+}
+
+body {
+  font: var(--ts-body-medium);
+  color: var(--md-sys-color-on-surface);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
+  border-radius: var(--md-sys-shape-corner-small);
+}
+
+/* ------------------------------------------------ 应用骨架 */
+.md3-app {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--md-sys-color-surface);
+  color: var(--md-sys-color-on-surface);
+}
+
+/* ---------------------------------------------- 顶栏 (MD3 Top App Bar) */
+.md3-app-bar {
+  flex: none;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px 0 24px;
+  background: var(--md-sys-color-surface);
+  -webkit-app-region: drag;          /* 自绘标题栏拖动区 */
+}
+.md3-app-bar__title {
+  flex: 1;
+  font: var(--ts-title-large);
+  color: var(--md-sys-color-on-surface);
+}
+.md3-app-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+}
+
+/* MD3 Icon Button (40px 圆形 + hover 状态层) */
+.md3-icon-btn {
+  appearance: none;
+  border: none;
+  background: none;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--md-sys-shape-corner-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--md-sys-color-on-surface-variant);
+  cursor: pointer;
+  transition: background-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+.md3-icon-btn svg { width: 22px; height: 22px; }
+.md3-icon-btn:hover {
+  background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+}
+.md3-icon-btn:active {
+  background: color-mix(in srgb, var(--md-sys-color-on-surface) 12%, transparent);
+}
+
+.md3-app__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* ---------------------------------------------- 导航抽屉 */
+.md3-drawer {
+  flex: none;
+  width: 224px;
+  height: 100%;
+  background: var(--md-sys-color-surface-container-low);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 12px;
+  gap: 8px;
+}
+
+.md3-drawer__header {
+  padding: 4px 12px 12px;
+}
+
+.md3-drawer__name { font: var(--ts-title-medium); color: var(--md-sys-color-on-surface); }
+.md3-drawer__ver { font: var(--ts-body-small); color: var(--md-sys-color-on-surface-variant); margin-top: 1px; }
+
+.md3-drawer__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.md3-nav-item {
+  appearance: none;
+  border: none;
+  background: none;
+  height: 56px;
+  border-radius: var(--md-sys-shape-corner-full);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  font: var(--ts-label-large);
+  letter-spacing: .1px;
+  color: var(--md-sys-color-on-surface-variant);
+  cursor: pointer;
+  transition: background-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+.md3-nav-item__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+.md3-nav-item__icon svg { width: 22px; height: 22px; }
+.md3-nav-item:hover {
+  background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+}
+.md3-nav-item.active {
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+}
+.md3-nav-item.active:hover {
+  background: color-mix(in srgb, var(--md-sys-color-on-secondary-container) 8%, var(--md-sys-color-secondary-container));
+}
+
+/* ------------------------------------------------ 内容区 */
+.md3-content {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.md3-page {
+  display: none;
+  height: 100%;
+  overflow-y: auto;
+  padding: 20px 24px 28px;
+}
+.md3-page.active { display: block; }
+
+.md3-page::-webkit-scrollbar { width: 8px; }
+.md3-page::-webkit-scrollbar-thumb {
+  background: var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-full);
+  border: 2px solid var(--md-sys-color-surface);
+}
+.md3-page::-webkit-scrollbar-track { background: transparent; }
+
+.md3-page-title {
+  font: var(--ts-headline-small);
+  color: var(--md-sys-color-on-surface);
+  padding: 4px 4px 4px;
+}
+
+.md3-section-label {
+  font: var(--ts-label-large);
+  letter-spacing: .1px;
+  color: var(--md-sys-color-primary);
+  padding: 20px 4px 8px;
+}
+
+/* 列表组 (Filled Card 容器, corner-medium) */
+.md3-group {
+  background: var(--md-sys-color-surface-container-low);
+  border-radius: var(--md-sys-shape-corner-medium);
+  overflow: hidden;
+}
+
+/* 行 (MD3 List Item: headline body-large + support body-medium) */
+.md3-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 72px;
+  padding: 10px 16px;
+}
+.md3-row:not(:first-child)::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 16px;
+  right: 0;
+  height: 1px;
+  background: var(--md-sys-color-outline-variant);
+}
+.md3-row__txt { flex: 1; min-width: 0; }
+.md3-row__headline { font: var(--ts-body-large); color: var(--md-sys-color-on-surface); }
+.md3-row__support { font: var(--ts-body-medium); color: var(--md-sys-color-on-surface-variant); margin-top: 2px; }
+
+/* ------------------------------------------------ Switch (MD3) */
+/* label 包裹结构: input 仅承载状态(隐藏), 轨道/手柄/勾选由 span+伪元素绘制 */
+.md3-switch {
+  position: relative;
+  flex: none;
+  display: inline-block;
+  width: 52px;
+  height: 32px;
+  cursor: pointer;
+}
+.md3-switch input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.md3-switch__track {
+  position: absolute;
+  inset: 0;
+  display: block;
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-surface-container-highest);
+  border: 2px solid var(--md-sys-color-outline);
+  pointer-events: none;
+  transition:
+    background-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+    border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+
+/* 手柄: 未选中 16px 居左, 选中 24px 居右 (on-primary) */
+.md3-switch__track::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 16px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-outline);
+  transform: translate(-50%, -50%);
+  transition:
+    left var(--md-sys-motion-duration-medium1) var(--md-sys-motion-easing-emphasized),
+    width var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-emphasized),
+    height var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-emphasized),
+    background-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+
+/* 勾选图标 (primary 色, 显示于 on-primary 手柄上) */
+.md3-switch__track::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 16px;
+  width: 10px;
+  height: 5px;
+  border-left: 2px solid var(--md-sys-color-primary);
+  border-bottom: 2px solid var(--md-sys-color-primary);
+  transform: translate(-50%, -68%) rotate(-45deg) scale(0);
+  transition:
+    left var(--md-sys-motion-duration-medium1) var(--md-sys-motion-easing-emphasized),
+    transform var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-emphasized);
+}
+
+/* 选中态: 三重驱动 (JS class / :has / 兄弟选择器), 任一生效即可 */
+.md3-switch__track.checked,
+.md3-switch:has(input:checked) .md3-switch__track,
+.md3-switch input:checked + .md3-switch__track {
+  background: var(--md-sys-color-primary);
+  border-color: var(--md-sys-color-primary);
+}
+.md3-switch__track.checked::before,
+.md3-switch:has(input:checked) .md3-switch__track::before,
+.md3-switch input:checked + .md3-switch__track::before {
+  left: 36px;
+  width: 24px;
+  height: 24px;
+  background: var(--md-sys-color-on-primary);
+}
+.md3-switch__track.checked::after,
+.md3-switch:has(input:checked) .md3-switch__track::after,
+.md3-switch input:checked + .md3-switch__track::after {
+  left: 36px;
+  transform: translate(-50%, -68%) rotate(-45deg) scale(1);
+}
+
+/* 键盘焦点环落在轨道上 */
+.md3-switch input:focus-visible + .md3-switch__track,
+.md3-switch:has(input:focus-visible) .md3-switch__track {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------ Outlined Select */
+.md3-select {
+  position: relative;
+  flex: none;
+  width: 208px;
+  height: 48px;
+  border-radius: var(--md-sys-shape-corner-extra-small);
+  border: 1px solid var(--md-sys-color-outline);
+  display: flex;
+  align-items: center;
+  transition: border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+.md3-select:hover {
+  background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+}
+.md3-select:focus-within {
+  border-color: var(--md-sys-color-primary);
+  box-shadow: inset 0 0 0 1px var(--md-sys-color-primary);
+}
+.md3-select__native {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: none;
+}
+.md3-select__value {
+  flex: 1;
+  min-width: 0;
+  padding-left: 14px;
+  font: var(--ts-body-large);
+  color: var(--md-sys-color-on-surface);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.md3-select__arrow {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-right: 10px;
+  color: var(--md-sys-color-on-surface-variant);
+  pointer-events: none;
+}
+
+/* ------------------------------------------------ 卡片 / 图表 */
+.md3-sum {
+  font: var(--ts-body-medium);
+  color: var(--md-sys-color-on-surface-variant);
+  padding: 0 4px 4px;
+}
+
+.md3-card {
+  background: var(--md-sys-color-surface-container-low);
+  border-radius: var(--md-sys-shape-corner-medium);
+  padding: 16px;
+  margin-top: 16px;
+}
+.md3-card__title {
+  font: var(--ts-title-medium);
+  color: var(--md-sys-color-on-surface);
+  margin-bottom: 12px;
+}
+.md3-card canvas { display: block; width: 100%; }
+
+.md3-x-labels {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 4px 0;
+  font: var(--ts-label-medium);
+  letter-spacing: .5px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+/* ------------------------------------------------ 数据表 (MD3 Data Table) */
+.md3-card--table { padding: 4px 0 0; }
+.md3-tbl-box {
+  max-height: 236px;
+  overflow-y: auto;
+}
+.md3-tbl-box::-webkit-scrollbar { width: 8px; }
+.md3-tbl-box::-webkit-scrollbar-thumb {
+  background: var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-full);
+  border: 2px solid var(--md-sys-color-surface-container-low);
+}
+.md3-tbl-box::-webkit-scrollbar-track { background: transparent; }
+
+.md3-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.md3-table th {
+  font: var(--ts-label-medium);
+  letter-spacing: .5px;
+  color: var(--md-sys-color-on-surface-variant);
+  text-align: left;
+  padding: 12px 16px;
+  position: sticky;
+  top: 0;
+  background: var(--md-sys-color-surface-container-low);
+}
+.md3-table td {
+  font: var(--ts-body-medium);
+  color: var(--md-sys-color-on-surface);
+  padding: 10px 16px;
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+}
+.md3-table tbody tr:hover { background: color-mix(in srgb, var(--md-sys-color-on-surface) 4%, transparent); }
+.md3-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.md3-table td.dim { color: var(--md-sys-color-on-surface-variant); }
+.md3-table .empty-tip {
+  text-align: center;
+  color: var(--md-sys-color-on-surface-variant);
+  padding: 28px 16px;
+}
