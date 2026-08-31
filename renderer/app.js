@@ -39,7 +39,7 @@
     volume: 50, mute: false,
     sources: [], selApp: '',
     lyrics: null, lyricKey: '',
-    trans: [], bilingual: true,
+    trans: [], bilingual: true, lyrSize: 12.5,
     art: null,
     updatedAt: 0,
     seekGraceUntil: 0,   // seek 后的桥接帧宽限期(防视觉回跳)
@@ -500,11 +500,23 @@
   }
 
   // 多行滚动歌词: 虚拟窗口渲染(仅当前行±7), 仅换行时触碰 DOM, 点击句子跳转
-  const LYR_LINE_H = 19;
-  const LYR_SUB_H = 15;
+  let LYR_LINE_H = 19;
+  let LYR_SUB_H = 15;
   const LYR_WINDOW = 7;
   // 行高: 双语模式下带翻译的行更高
   const rowH = (i) => (S.bilingual && lineTrans[i]) ? LYR_LINE_H + LYR_SUB_H : LYR_LINE_H;
+
+  // 字号应用: CSS 变量 + 行高度量同步 (滚动定位依赖行高)
+  function applyLyrSize() {
+    const s = S.lyrSize || 12.5;
+    const sub = Math.round((s - 2) * 2) / 2;
+    LYR_LINE_H = Math.ceil(s * 1.52);
+    LYR_SUB_H = Math.round(sub * 1.43);
+    island.style.setProperty('--lyr-size', s + 'px');
+    island.style.setProperty('--lyr-sub-size', sub + 'px');
+    island.style.setProperty('--lyr-line-h', LYR_LINE_H + 'px');
+    island.style.setProperty('--lyr-sub-h', LYR_SUB_H + 'px');
+  }
 
   // 将翻译行按时间戳对齐到原文行: lineTrans[i] = 第 i 行的翻译
   function rebuildTrans(lines) {
@@ -769,11 +781,18 @@
     setState(hovered ? expandState() : autoState());
   });
 
-  // ---------------------------------------------------------------- 毛玻璃 / 双语字幕
+  // ---------------------------------------------------------------- 毛玻璃 / 双语字幕 / 字号
   api.onGlass((g) => document.body.classList.toggle('glass', !!g));
   api.onBilingual((b) => {
     S.bilingual = !!b;
     // 行高结构可能变化, 强制重建歌词 DOM
+    lyricsBuiltKey = '';
+    lyrWinStart = -1;
+    lastDomIdx = -999;
+  });
+  api.onLyrSize((v) => {
+    S.lyrSize = Number(v) || 12.5;
+    applyLyrSize();
     lyricsBuiltKey = '';
     lyrWinStart = -1;
     lastDomIdx = -999;
@@ -824,5 +843,6 @@
   });
 
   setState('idle');
+  applyLyrSize();
   tick();
 })();

@@ -25,6 +25,10 @@ contextBridge.exposeInMainWorld('island', {
   onGlass: (cb) => ipcRenderer.on('glass-changed', (_e, g) => cb(g)),
   // 双语字幕开关
   onBilingual: (cb) => ipcRenderer.on('bilingual-changed', (_e, b) => cb(b)),
+  // 岛体歌词字号
+  onLyrSize: (cb) => ipcRenderer.on('lyr-size-changed', (_e, v) => cb(v)),
+  // 桌面歌词字号
+  onDesktopStyle: (cb) => ipcRenderer.on('dl-style', (_e, v) => cb(v)),
   // 主窗底部统计文本(主进程推送)
   onStatsText: (cb) => ipcRenderer.on('stats-text', (_e, t) => cb(t)),
   // 设置窗口
@@ -34,4 +38,8 @@ contextBridge.exposeInMainWorld('island', {
   onStatsUpdated: (cb) => ipcRenderer.on('stats-updated', () => cb()),
   // 自绘标题栏窗口控制(设置窗口)
   winCtrl: (action) => ipcRenderer.send('win-ctrl', action),
+  // 自动更新(打包版): 状态查询 / 执行更新 / 进度推送
+  updateGet: () => ipcRenderer.invoke('update-get'),
+  updateApply: () => ipcRenderer.invoke('update-apply'),
+  onUpdateStatus: (cb) => ipcRenderer.on('update-status', (_e, v) => cb(v)),
 });

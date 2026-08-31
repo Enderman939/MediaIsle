@@ -6,6 +6,13 @@
   let cur = null;
   let hideTimer = null;
 
+  // 字号设置: { size: 原文字号px, subSize: 译文字号px }
+  window.island.onDesktopStyle((st) => {
+    const root = document.documentElement;
+    if (st && st.size > 0) root.style.setProperty('--dl-size', st.size + 'px');
+    if (st && st.subSize > 0) root.style.setProperty('--dl-sub-size', st.subSize + 'px');
+  });
+
   window.island.onDesktopLine((payload) => {
     let x = '', s = '';
     if (typeof payload === 'string') x = payload;

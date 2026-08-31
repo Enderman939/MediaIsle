@@ -5,9 +5,45 @@
   "productName": "MediaIsle",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "node scripts/write-build-info.js && electron-builder --win --x64"
+  },
+  "build": {
+    "appId": "com.enderman939.mediaisle",
+    "productName": "MediaIsle",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "bridge.ps1",
+      "renderer/**/*",
+      "assets/**/*",
+      "build-info.json",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "bridge.ps1"
+    ],
+    "npmRebuild": false,
+    "win": {
+      "target": [
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "MediaIsle-${version}-portable.${ext}"
+    }
   },
   "devDependencies": {
-    "electron": "^37.0.0"
+    "electron": "^37.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "lmdb": "^3.5.6"
   }
 }

@@ -19,7 +19,7 @@
     }
     #dlText {
       max-width: 96%;
-      font-size: 32px;
+      font-size: var(--dl-size, 32px);
       font-weight: 700;
       letter-spacing: .5px;
       color: #fff;
@@ -36,9 +36,9 @@
     /* 译文层: 常驻占位, 保证原文字幕位置不随有无翻译跳动 */
     #dlSub {
       max-width: 96%;
-      height: 24px;
+      height: calc(var(--dl-sub-size, 17px) * 1.45);
       margin-top: 2px;
-      font-size: 17px;
+      font-size: var(--dl-sub-size, 17px);
       font-weight: 500;
       letter-spacing: .4px;
       color: rgba(255, 255, 255, .82);

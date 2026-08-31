@@ -5,7 +5,7 @@
 //  - 默认鼠标穿透, 悬停岛内时恢复交互
 //  - 通过 PowerShell 桥接(bridge.ps1)读取/控制系统媒体(SMTC)
 // =====================================================================
-const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage, net } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -66,7 +66,7 @@ function attachConsoleForward(winObj, tag) {
 
 // 配置持久化(毛玻璃/桌面歌词)
 const CFG_FILE = path.join(app.getPath('userData'), 'config.json');
-let cfg = { glass: false, dlyr: false, lyrics: 'race', fsHide: true, bilingual: true };
+let cfg = { glass: false, dlyr: false, lyrics: 'race', fsHide: true, bilingual: true, lyrSize: 12.5, dlyrSize: 32 };
 try { Object.assign(cfg, JSON.parse(fs.readFileSync(CFG_FILE, 'utf8'))); } catch { }
 let cfgTimer = null;
 function saveCfg() {
@@ -215,6 +215,7 @@ function createWindow() {
     keepOnTop();
     send('glass-changed', !!cfg.glass);
     send('bilingual-changed', cfg.bilingual !== false);
+    send('lyr-size-changed', cfg.lyrSize || 12.5);
   });
 
   // 调试: 转发渲染层 console 输出 (error/warning 级别同时写入 error.log)
@@ -232,7 +233,12 @@ function createWindow() {
 // ---------------------------------------------------------------- 桥接
 function startBridge() {
   bridgeLastStart = Date.now();
-  const bridgePath = path.join(__dirname, 'bridge.ps1');
+  // 打包后 bridge.ps1 位于 asar 解包目录(PowerShell 子进程无法读取 asar 内部)
+  let bridgePath = path.join(__dirname, 'bridge.ps1');
+  if (bridgePath.includes('app.asar') && !bridgePath.includes('app.asar.unpacked')) {
+    const alt = bridgePath.replace('app.asar', 'app.asar.unpacked');
+    if (fs.existsSync(alt)) bridgePath = alt;
+  }
   bridge = spawn('powershell.exe', [
     '-NoProfile',
     '-NonInteractive',
@@ -402,6 +408,119 @@ ipcMain.on('media-command', (_e, cmd, val) => {
   sendCommand(cmd, val);
 });
 
+// ---------------------------------------------------------------- 自动更新
+// 仅打包版启用: 从 GitHub Release 拉取 latest.json, 比对编译日期,
+// 发现新构建则下载 zip -> 解压 -> 由 cmd 脚本在进程退出后换文件并重启。
+// 源代码运行 (app.isPackaged === false 或缺 build-info.json) 时不比对。
+const REPO = 'Enderman939/MediaIsle';
+let localBuildDate = null;
+try {
+  if (app.isPackaged) {
+    localBuildDate = JSON.parse(fs.readFileSync(path.join(__dirname, 'build-info.json'), 'utf8')).buildDate || null;
+  }
+} catch { }
+
+let updateAvail = null;     // 最近一次检查的结果
+let updateStage = '';       // '' | 'download' | 'extract' | 'restart' | 'error'
+let updateBusy = false;
+let updateLastCheck = 0;
+
+function send2(ch, ...args) {
+  send(ch, ...args);
+  try { if (setWin && !setWin.isDestroyed()) setWin.webContents.send(ch, ...args); } catch { }
+}
+
+async function checkForUpdate() {
+  if (!app.isPackaged || !localBuildDate) return null;
+  try {
+    // net.fetch: Chromium 网络栈, 走系统代理与系统证书 (直连 fetch 在代理/拦截环境下不可用)
+    const res = await net.fetch('https://github.com/' + REPO + '/releases/latest/download/latest.json', { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return null;
+    const info = await res.json();
+    const remote = Date.parse(info.buildDate || '');
+    const local = Date.parse(localBuildDate);
+    if (!(remote > 0) || !(local > 0)) return null;
+    // 容忍 60s 时钟偏差
+    if (remote - local > 60e3) return { version: info.version || '', buildDate: info.buildDate, zip: info.zip || '' };
+  } catch { }
+  return null;
+}
+
+async function runUpdateCheck(force) {
+  if (!app.isPackaged || !localBuildDate || updateBusy) return updateAvail;
+  const now = Date.now();
+  if (!force && now - updateLastCheck < 10 * 60e3) return updateAvail;
+  updateLastCheck = now;
+  updateAvail = await checkForUpdate();
+  if (updateAvail) {
+    try { tray.displayBalloon({ title: 'MediaIsle', content: '发现新版本 (构建于 ' + updateAvail.buildDate.slice(0, 10) + ')，可在设置中更新' }); } catch { }
+  }
+  return updateAvail;
+}
+
+async function applyUpdate() {
+  if (!app.isPackaged || updateBusy) return false;
+  const avail = updateAvail || await runUpdateCheck(true);
+  if (!avail || !avail.zip) return false;
+  updateBusy = true;
+  try {
+    const dir = path.join(app.getPath('userData'), 'update');
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.mkdirSync(dir, { recursive: true });
+    const zipPath = path.join(dir, 'update.zip');
+
+    updateStage = 'download';
+    send2('update-status', { stage: updateStage });
+    const res = await net.fetch('https://github.com/' + REPO + '/releases/latest/download/' + encodeURIComponent(avail.zip));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    fs.writeFileSync(zipPath, Buffer.from(await res.arrayBuffer()));
+
+    updateStage = 'extract';
+    send2('update-status', { stage: updateStage });
+    const newDir = path.join(dir, 'new');
+    await new Promise((resolve, reject) => {
+      const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
+        'Expand-Archive -LiteralPath "' + zipPath + '" -DestinationPath "' + newDir + '" -Force'], { windowsHide: true });
+      ps.on('exit', (c) => (c === 0 ? resolve() : reject(new Error('解压失败 (exit ' + c + ')'))));
+      ps.on('error', reject);
+    });
+
+    // 生成换文件脚本: 等进程退出 -> 覆盖安装目录 -> 重启 (分离执行, 独立于本进程存活)
+    updateStage = 'restart';
+    send2('update-status', { stage: updateStage });
+    const exeName = path.basename(app.getPath('exe'));
+    const installDir = path.dirname(app.getPath('exe'));
+    const cmdPath = path.join(dir, 'update.cmd');
+    const cmd = [
+      '@echo off',
+      // ping 延时: timeout 在无控制台的分离进程里会因输入重定向失败
+      'ping -n 3 127.0.0.1 >nul',
+      'taskkill /f /im ' + exeName + ' >nul 2>&1',
+      'xcopy /e /y /i "' + newDir + '\\*" "' + installDir + '" >nul',
+      'rmdir /s /q "' + newDir + '"',
+      'del /q "' + zipPath + '"',
+      'start "" "' + path.join(installDir, exeName) + '"',
+      '(goto) 2>nul & del "%~f0"',
+    ].join('\r\n');
+    fs.writeFileSync(cmdPath, cmd);
+    const child = spawn('cmd.exe', ['/c', cmdPath], { detached: true, stdio: 'ignore', windowsHide: true });
+    child.unref();
+    setTimeout(() => app.quit(), 800);
+    return true;
+  } catch (e) {
+    updateStage = 'error';
+    send2('update-status', { stage: 'error', message: (e && e.message) || String(e) });
+    updateBusy = false;
+    return false;
+  }
+}
+
+ipcMain.handle('update-get', async () => {
+  if (app.isPackaged && localBuildDate) await runUpdateCheck(false);
+  return { packaged: !!app.isPackaged, localBuildDate, available: updateAvail, stage: updateStage, busy: updateBusy };
+});
+ipcMain.handle('update-apply', () => applyUpdate());
+
 // ---------------------------------------------------------------- 设置窗口
 let setWin = null;
 function createSettingsWindow() {
@@ -441,6 +560,8 @@ ipcMain.handle('cfg-get', () => ({
   lyrics: cfg.lyrics || 'race',
   fsHide: cfg.fsHide !== false,
   bilingual: cfg.bilingual !== false,
+  lyrSize: cfg.lyrSize || 12.5,
+  dlyrSize: cfg.dlyrSize || 32,
 }));
 
 ipcMain.handle('cfg-set', (_e, key, val) => {
@@ -463,6 +584,22 @@ ipcMain.handle('cfg-set', (_e, key, val) => {
     cfg.bilingual = !!val;
     saveCfg();
     send('bilingual-changed', cfg.bilingual);
+  } else if (key === 'lyrSize') {
+    const n = Number(val);
+    if (isFinite(n) && n >= 10 && n <= 18) {
+      cfg.lyrSize = n;
+      saveCfg();
+      send('lyr-size-changed', cfg.lyrSize);
+    }
+  } else if (key === 'dlyrSize') {
+    const n = Number(val);
+    if (isFinite(n) && n >= 18 && n <= 56) {
+      cfg.dlyrSize = n;
+      saveCfg();
+      try {
+        if (dlWin && !dlWin.isDestroyed()) dlWin.webContents.send('dl-style', { size: cfg.dlyrSize, subSize: Math.round(cfg.dlyrSize * 0.53) });
+      } catch { }
+    }
   } else if (key === 'fsHide') {
     cfg.fsHide = !!val;
     saveCfg();
@@ -983,7 +1120,11 @@ function ensureDlyrics() {
   dlWin.loadFile(path.join(__dirname, 'renderer', 'dlyrics.html'));
   attachConsoleForward(dlWin, 'dlyr');
   positionDlyrics();
-  dlWin.once('ready-to-show', () => { dlWin.showInactive(); keepOnTop(); });
+  dlWin.once('ready-to-show', () => {
+    try { dlWin.webContents.send('dl-style', { size: cfg.dlyrSize || 32, subSize: Math.round((cfg.dlyrSize || 32) * 0.53) }); } catch { }
+    dlWin.showInactive();
+    keepOnTop();
+  });
 }
 function positionDlyrics() {
   if (!dlWin || dlWin.isDestroyed()) return;
@@ -1041,6 +1182,11 @@ if (!app.requestSingleInstanceLock()) {
     createTray();
     if (cfg.dlyr) ensureDlyrics();
     screen.on('display-metrics-changed', positionDlyrics);
+    // 打包版: 启动 30s 后后台检查更新
+    if (app.isPackaged && localBuildDate) {
+      setTimeout(() => runUpdateCheck(false).catch(() => { }), 30e3);
+      setInterval(() => runUpdateCheck(false).catch(() => { }), 6 * 3600e3); // 每 6 小时复查
+    }
   });
 
   app.on('window-all-closed', () => {

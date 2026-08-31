@@ -465,9 +465,9 @@ body.glass .e-lyrics::after  { background: linear-gradient(rgba(24,24,30,0), rgb
   backface-visibility: hidden;
 }
 .yl-line {
-  height: 19px;
-  line-height: 19px;
-  font-size: 12.5px;
+  height: var(--lyr-line-h, 19px);
+  line-height: var(--lyr-line-h, 19px);
+  font-size: var(--lyr-size, 12.5px);
   color: rgba(255, 255, 255, .34);
   white-space: nowrap;
   overflow: hidden;
@@ -479,13 +479,13 @@ body.glass .e-lyrics::after  { background: linear-gradient(rgba(24,24,30,0), rgb
 .yl-line:hover { color: rgba(255, 255, 255, .72); }
 .yl-line.ph { color: rgba(255, 255, 255, .22); cursor: default; pointer-events: none; }
 
-/* 双语翻译副行 */
-.yl-line.has-sub { height: 34px; }
+/* 双语翻译副行 (高度随字号变量伸缩) */
+.yl-line.has-sub { height: calc(var(--lyr-line-h, 19px) + var(--lyr-sub-h, 15px)); }
 .yl-sub {
   display: block;
-  height: 15px;
-  line-height: 13px;
-  font-size: 10.5px;
+  height: var(--lyr-sub-h, 15px);
+  line-height: calc(var(--lyr-sub-h, 15px) - 2px);
+  font-size: var(--lyr-sub-size, 10.5px);
   font-weight: 400;
   color: rgba(255, 255, 255, .30);
   white-space: nowrap;

@@ -7,6 +7,13 @@
   const swFs = document.getElementById('swFs');
   const selLyric = document.getElementById('selLyric');
   const selLyricLabel = document.getElementById('selLyricLabel');
+  const rngLyr = document.getElementById('rngLyr');
+  const rngLyrVal = document.getElementById('rngLyrVal');
+  const rngDl = document.getElementById('rngDl');
+  const rngDlVal = document.getElementById('rngDlVal');
+  const updTitle = document.getElementById('updTitle');
+  const updSub = document.getElementById('updSub');
+  const btnUpdate = document.getElementById('btnUpdate');
   const sumTotal = document.getElementById('sumTotal');
   const chartDays = document.getElementById('chartDays');
   const chartTop = document.getElementById('chartTop');
@@ -61,23 +68,91 @@
     swFs.checked = cfg.fsHide !== false;
     [swGlass, swDlyr, swBi, swAuto, swFs].forEach(syncSwitch);
     selLyric.value = cfg.lyrics || 'race';
-    syncSelLabel();
+    syncSelLabel(selLyric);
+    setRange(rngLyr, rngLyrVal, cfg.lyrSize || 12.5, (v) => v.toFixed(1));
+    setRange(rngDl, rngDlVal, cfg.dlyrSize || 32, (v) => v + ' px');
   }
-  function syncSelLabel() {
-    if (!selLyricLabel) return;
-    const op = selLyric.options[selLyric.selectedIndex];
-    selLyricLabel.textContent = op ? op.textContent : '';
+  function syncSelLabel(sel) {
+    const label = sel.parentElement.querySelector('.md3-select__value');
+    if (label) label.textContent = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].textContent : '';
+  }
+  function bindSelect(sel, key) {
+    sel.addEventListener('change', async () => {
+      syncSelLabel(sel); // 先行同步视觉, 配置回包后再校正
+      const num = Number(sel.value);
+      const cfg = await api.setCfg(key, isFinite(num) && String(num) === sel.value ? num : sel.value);
+      applyCfg(cfg);
+    });
+  }
+  // MD3 滑动条: 轨道填充比 + 数值标签 + 防抖写配置
+  function setRange(input, valEl, v, fmt) {
+    input.value = v;
+    paintRange(input);
+    valEl.textContent = fmt(Number(v));
+  }
+  function paintRange(input) {
+    const min = Number(input.min), max = Number(input.max);
+    const p = ((Number(input.value) - min) / (max - min)) * 100;
+    input.style.setProperty('--p', p + '%');
+  }
+  function bindRange(input, valEl, key, fmt) {
+    let t = null;
+    input.addEventListener('input', () => {
+      paintRange(input);
+      valEl.textContent = fmt(Number(input.value));
+      clearTimeout(t);
+      t = setTimeout(async () => {
+        const cfg = await api.setCfg(key, Number(input.value));
+        applyCfg(cfg);
+      }, 400);
+    });
   }
   bindSwitch(swGlass, 'glass');
   bindSwitch(swDlyr, 'dlyr');
   bindSwitch(swBi, 'bilingual');
   bindSwitch(swAuto, 'autostart');
   bindSwitch(swFs, 'fsHide');
-  selLyric.addEventListener('change', async () => {
-    const cfg = await api.setCfg('lyrics', selLyric.value);
-    applyCfg(cfg);
-  });
+  bindSelect(selLyric, 'lyrics');
+  bindRange(rngLyr, rngLyrVal, 'lyrSize', (v) => v.toFixed(1));
+  bindRange(rngDl, rngDlVal, 'dlyrSize', (v) => v + ' px');
   api.getCfg().then(applyCfg).catch(() => { });
+
+  // ---------------------------------------------------------------- 自动更新
+  async function refreshUpdate() {
+    if (!api.updateGet) return;
+    try {
+      const st = await api.updateGet();
+      if (!st.packaged) {
+        updTitle.textContent = '当前为源代码运行';
+        updSub.textContent = '开发模式不检查更新';
+        btnUpdate.hidden = true;
+        return;
+      }
+      const fmt = (d) => (Date.parse(d) > 0 ? new Date(d).toLocaleString('zh-CN', { hour12: false }) : '未知');
+      if (st.stage === 'download') { updTitle.textContent = '正在下载更新…'; updSub.textContent = '请稍候'; btnUpdate.disabled = true; btnUpdate.hidden = false; return; }
+      if (st.stage === 'extract') { updTitle.textContent = '正在解压更新…'; btnUpdate.disabled = true; btnUpdate.hidden = false; return; }
+      if (st.stage === 'restart') { updTitle.textContent = '即将重启完成更新…'; btnUpdate.disabled = true; btnUpdate.hidden = false; return; }
+      if (st.stage === 'error') {
+        updTitle.textContent = '更新失败';
+        updSub.textContent = st.message || '发生未知错误';
+        btnUpdate.hidden = false; btnUpdate.disabled = false; btnUpdate.textContent = '重试';
+        return;
+      }
+      btnUpdate.textContent = '立即更新';
+      if (st.available) {
+        updTitle.textContent = '发现新版本' + (st.available.version ? ' (v' + st.available.version + ')' : '');
+        updSub.textContent = '新构建 ' + fmt(st.available.buildDate) + ' · 当前构建 ' + fmt(st.localBuildDate);
+        btnUpdate.hidden = false; btnUpdate.disabled = false;
+      } else {
+        updTitle.textContent = '已是最新版本';
+        updSub.textContent = '当前构建 ' + fmt(st.localBuildDate);
+        btnUpdate.hidden = true;
+      }
+    } catch { }
+  }
+  if (api.onUpdateStatus) api.onUpdateStatus(() => refreshUpdate());
+  if (btnUpdate) btnUpdate.addEventListener('click', async () => { btnUpdate.disabled = true; try { await api.updateApply(); } catch { } refreshUpdate(); });
+  refreshUpdate();
 
   // ---------------------------------------------------------------- 工具
   // MD3 令牌读取 (图表绘制需要具体色值, 从 CSS 令牌解析)

@@ -140,9 +140,40 @@
           </div>
           <div class="md3-row">
             <div class="md3-row__txt">
+              <div class="md3-row__headline">歌词字号</div>
+              <div class="md3-row__support">展开面板歌词列（译文等比缩放）</div>
+            </div>
+            <div class="md3-slider">
+              <input type="range" id="rngLyr" min="11" max="16" step="0.5" aria-label="歌词字号">
+              <span class="md3-slider__val" id="rngLyrVal">12.5</span>
+            </div>
+          </div>
+          <div class="md3-row">
+            <div class="md3-row__txt">
+              <div class="md3-row__headline">桌面歌词字号</div>
+              <div class="md3-row__support">译文等比缩放</div>
+            </div>
+            <div class="md3-slider">
+              <input type="range" id="rngDl" min="20" max="48" step="1" aria-label="桌面歌词字号">
+              <span class="md3-slider__val" id="rngDlVal">32 px</span>
+            </div>
+          </div>
+          <div class="md3-row">
+            <div class="md3-row__txt">
               <div class="md3-row__headline">匹配精度</div>
               <div class="md3-row__support">自动核对标题与歌手，避免同名词曲误配</div>
             </div>
+          </div>
+        </div>
+
+        <div class="md3-section-label">更新</div>
+        <div class="md3-group">
+          <div class="md3-row">
+            <div class="md3-row__txt">
+              <div class="md3-row__headline" id="updTitle">检查更新</div>
+              <div class="md3-row__support" id="updSub"></div>
+            </div>
+            <button class="md3-btn" id="btnUpdate" hidden>立即更新</button>
           </div>
         </div>
       </section>
