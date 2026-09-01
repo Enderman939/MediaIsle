@@ -797,6 +797,13 @@
     lyrWinStart = -1;
     lastDomIdx = -999;
   });
+  // 音源/策略变化: 丢弃当前歌词, 下一帧按新配置重新获取
+  api.onLyricsRefetch(() => {
+    S.lyricKey = '';
+    S.lyrics = null;
+    S.trans = [];
+    curLineIdx = -1;
+  });
 
   // ---------------------------------------------------------------- 控制
   btnToggle.addEventListener('click', () => {

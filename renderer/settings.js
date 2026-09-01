@@ -136,7 +136,8 @@
       lyrSources.push(id);
     }
     renderChips();
-    await api.setCfg('lyrSources', lyrSources);
+    const cfg2 = await api.setCfg('lyrSources', lyrSources);
+    applyCfg(cfg2);
   });
   api.getCfg().then(applyCfg).catch(() => { });
 

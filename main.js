@@ -613,11 +613,16 @@ ipcMain.handle('cfg-set', (_e, key, val) => {
       const ids = val.filter((id) => LYRIC_SOURCES.some((s) => s.id === id));
       cfg.lyrSources = ids;
       saveCfg();
+      // 音源/策略变化: 清歌词缓存并让岛体立即重抓当前曲目
+      lyrCache.clear();
+      send('lyrics-refetch');
     }
   } else if (key === 'lyrStrategy') {
     if (val === 'race' || val === 'quality') {
       cfg.lyrStrategy = val;
       saveCfg();
+      lyrCache.clear();
+      send('lyrics-refetch');
     }
   } else if (key === 'bilingual') {
     cfg.bilingual = !!val;

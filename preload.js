@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld('island', {
   onBilingual: (cb) => ipcRenderer.on('bilingual-changed', (_e, b) => cb(b)),
   // 岛体歌词字号
   onLyrSize: (cb) => ipcRenderer.on('lyr-size-changed', (_e, v) => cb(v)),
+  // 歌词源/策略变化: 重新抓取当前曲目歌词
+  onLyricsRefetch: (cb) => ipcRenderer.on('lyrics-refetch', () => cb()),
   // 桌面歌词字号
   onDesktopStyle: (cb) => ipcRenderer.on('dl-style', (_e, v) => cb(v)),
   // 主窗底部统计文本(主进程推送)
