@@ -1,6 +1,6 @@
 {
   "name": "mediaisle",
-  "version": "1.0.1",
+  "version": "1.0.1+20260901.2046",
   "description": "MediaIsle - Dynamic Island style media controller for Windows",
   "productName": "MediaIsle",
   "main": "main.js",
@@ -31,7 +31,9 @@
       "target": [
         {
           "target": "zip",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "artifactName": "MediaIsle-${version}-portable.${ext}"
