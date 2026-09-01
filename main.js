@@ -657,8 +657,13 @@ ipcMain.handle('cfg-set', (_e, key, val) => {
     glass: !!cfg.glass,
     dlyr: !!cfg.dlyr,
     autostart: app.getLoginItemSettings().openAtLogin,
-    lyrics: cfg.lyrics || 'race',
+    lyrSources: Array.isArray(cfg.lyrSources) ? cfg.lyrSources.slice() : ['soda', 'netease', 'qq', 'kugou'],
+    lyrStrategy: cfg.lyrStrategy === 'quality' ? 'quality' : 'race',
     fsHide: cfg.fsHide !== false,
+    bilingual: cfg.bilingual !== false,
+    lyrSize: cfg.lyrSize || 12.5,
+    dlyrSize: cfg.dlyrSize || 32,
+    version: app.getVersion(),
   };
 });
 
