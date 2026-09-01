@@ -10,6 +10,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const zlib = require('zlib');
 
 // ---------------------------------------------------------------- 更名数据迁移
 // 应用由 FastMusic Island 更名 MediaIsle, userData 目录随名变化,
@@ -1033,6 +1034,46 @@ async function srcSoda(query) {
   return null;
 }
 
+// ---------------------------------------------------------------- 酷狗 KRC 解密 (含翻译)
+// KRC: base64 -> 跳过 4 字节魔数("krc1") -> 16 字节循环 XOR -> zlib 解压;
+// 原文行为 [ms,dur]<off,dur,0>词 逐字格式, 翻译在 language 标签 (base64 JSON, type 1 = 逐句翻译)
+const KRC_KEY = Buffer.from([0x40, 0x47, 0x61, 0x77, 0x5e, 0x32, 0x74, 0x47, 0x51, 0x36, 0x31, 0x2d, 0xce, 0xd2, 0x6e, 0x69]);
+function parseKrc(b64) {
+  const data = Buffer.from(b64, 'base64');
+  if (data.length < 5) return null;
+  const out = Buffer.alloc(data.length - 4);
+  for (let i = 4; i < data.length; i++) out[i - 4] = data[i] ^ KRC_KEY[(i - 4) % KRC_KEY.length];
+  const text = zlib.inflateSync(out).toString('utf8');
+  let langTag = null;
+  const entries = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line.startsWith('[')) continue;
+    const m = /^\[(\d+),(\d+)\](.*)$/.exec(line);
+    if (m) {
+      const x = m[3].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+      entries.push({ t: parseInt(m[1], 10) / 1000, x });
+      continue;
+    }
+    const tg = /^\[(\w+):([^\]]*)\]$/.exec(line);
+    if (tg && tg[1] === 'language') langTag = tg[2];
+  }
+  const trans = [];
+  if (langTag) {
+    try {
+      const lang = JSON.parse(Buffer.from(langTag, 'base64').toString('utf8'));
+      const ts = (lang.content || []).find((c) => c.type === 1);
+      if (ts && Array.isArray(ts.lyricContent)) {
+        for (let i = 0; i < Math.min(entries.length, ts.lyricContent.length); i++) {
+          const s = (ts.lyricContent[i] || [])[0];
+          if (s && s.trim() && entries[i].x) trans.push({ t: entries[i].t, x: s.trim() });
+        }
+      }
+    } catch { }
+  }
+  return { entries: entries.filter((e) => e.x), trans };
+}
+
 async function srcKugou(query) {
   const { title, artist, duration } = query;
   const ac = new AbortController();
@@ -1054,6 +1095,19 @@ async function srcKugou(query) {
           const cand = cs && cs.candidates && cs.candidates[0];
           if (!cand || !cand.id) continue;
           const aKey = cand.accesskey || cand.access_key || '';
+          // 优先 KRC: 解密后同时得到原文(逐字)与翻译; 失败回退 lrc
+          try {
+            const kr = await httpJson(
+              `https://lyrics.kugou.com/download?ver=1&client=pc&id=${cand.id}&accesskey=${aKey}&fmt=krc&charset=utf8`,
+              H_UA, ac.signal);
+            if (kr && kr.content) {
+              const parsed = parseKrc(kr.content);
+              const lines = parsed ? parsed.entries.map(({ t, x }) => ({ t, x })) : [];
+              if (validateLines(lines, duration)) {
+                return { lines, dur: s.duration || 0, trans: parsed.trans };
+              }
+            }
+          } catch { }
           const dl = await httpJson(
             `https://lyrics.kugou.com/download?ver=1&client=pc&id=${cand.id}&accesskey=${aKey}&fmt=lrc&charset=utf8`,
             H_UA, ac.signal);
