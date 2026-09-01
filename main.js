@@ -64,9 +64,31 @@ function attachConsoleForward(winObj, tag) {
   });
 }
 
+// ---------------------------------------------------------------- 运行日志缓冲
+// 包装全局 console: 主进程日志 + 各窗口转发的日志统一进环形缓冲,
+// 设置窗口的"日志"页读取展示 (最多保留 600 行)
+const LOG_BUF_MAX = 600;
+const logBuf = [];
+let logSeq = 0;
+const origLog = console.log.bind(console);
+const origErr = console.error.bind(console);
+function fmtArgs(a) {
+  return a.map((x) => (typeof x === 'string' ? x : (() => { try { return JSON.stringify(x); } catch { return String(x); } })())).join(' ');
+}
+function pushLog(level, line) {
+  const entry = { i: ++logSeq, t: Date.now(), level, line };
+  logBuf.push(entry);
+  if (logBuf.length > LOG_BUF_MAX) logBuf.splice(0, logBuf.length - LOG_BUF_MAX);
+  try { if (setWin && !setWin.isDestroyed()) setWin.webContents.send('log-appended', entry); } catch { }
+}
+console.log = (...a) => { const line = fmtArgs(a); pushLog('info', line); origLog(line); };
+console.error = (...a) => { const line = fmtArgs(a); pushLog('error', line); origErr(line); };
+ipcMain.handle('log-get', () => logBuf.slice());
+ipcMain.on('log-clear', () => { logBuf.length = 0; });
+
 // 配置持久化(毛玻璃/桌面歌词)
 const CFG_FILE = path.join(app.getPath('userData'), 'config.json');
-let cfg = { glass: false, dlyr: false, lyrics: 'race', fsHide: true, bilingual: true, lyrSize: 12.5, dlyrSize: 32 };
+let cfg = { glass: false, dlyr: false, fsHide: true, bilingual: true, lyrSize: 12.5, dlyrSize: 32, lyrSources: ['soda', 'netease', 'qq', 'kugou'], lyrStrategy: 'race' };
 try { Object.assign(cfg, JSON.parse(fs.readFileSync(CFG_FILE, 'utf8'))); } catch { }
 let cfgTimer = null;
 function saveCfg() {
@@ -74,6 +96,15 @@ function saveCfg() {
   cfgTimer = setTimeout(() => {
     try { fs.writeFileSync(CFG_FILE, JSON.stringify(cfg)); } catch { }
   }, 600);
+}
+
+// 旧版单值歌词策略迁移: lyrics -> lyrSources + lyrStrategy
+if (!Array.isArray(cfg.lyrSources)) {
+  const old = cfg.lyrics;
+  if (['netease', 'qq', 'kugou', 'soda'].includes(old)) cfg.lyrSources = [old];
+  else cfg.lyrSources = ['soda', 'netease', 'qq', 'kugou'];
+  cfg.lyrStrategy = old === 'quality' ? 'quality' : 'race';
+  saveCfg();
 }
 
 // ---------------------------------------------------------------- 听歌统计
@@ -557,11 +588,13 @@ ipcMain.handle('cfg-get', () => ({
   glass: !!cfg.glass,
   dlyr: !!cfg.dlyr,
   autostart: app.getLoginItemSettings().openAtLogin,
-  lyrics: cfg.lyrics || 'race',
+  lyrSources: Array.isArray(cfg.lyrSources) ? cfg.lyrSources.slice() : ['soda', 'netease', 'qq', 'kugou'],
+  lyrStrategy: cfg.lyrStrategy === 'quality' ? 'quality' : 'race',
   fsHide: cfg.fsHide !== false,
   bilingual: cfg.bilingual !== false,
   lyrSize: cfg.lyrSize || 12.5,
   dlyrSize: cfg.dlyrSize || 32,
+  version: app.getVersion(),
 }));
 
 ipcMain.handle('cfg-set', (_e, key, val) => {
@@ -575,9 +608,15 @@ ipcMain.handle('cfg-set', (_e, key, val) => {
     if (cfg.dlyr) ensureDlyrics(); else closeDlyrics();
   } else if (key === 'autostart') {
     app.setLoginItemSettings({ openAtLogin: !!val });
-  } else if (key === 'lyrics') {
-    if (['race', 'quality', 'netease', 'qq', 'kugou', 'soda'].includes(val)) {
-      cfg.lyrics = val;
+  } else if (key === 'lyrSources') {
+    if (Array.isArray(val)) {
+      const ids = val.filter((id) => LYRIC_SOURCES.some((s) => s.id === id));
+      cfg.lyrSources = ids;
+      saveCfg();
+    }
+  } else if (key === 'lyrStrategy') {
+    if (val === 'race' || val === 'quality') {
+      cfg.lyrStrategy = val;
       saveCfg();
     }
   } else if (key === 'bilingual') {
@@ -1050,18 +1089,12 @@ async function fetchLyrics(query) {
     return r;
   };
 
-  const raw = cfg.lyrics || 'race';
-  const strat = ['race', 'quality', 'netease', 'qq', 'kugou', 'soda'].includes(raw) ? raw : 'race';
+  // 按用户启用的音源并发 (固定优先级: 汽水 > 网易 > QQ > 酷狗)
+  const enabled = LYRIC_SOURCES.filter((s) => Array.isArray(cfg.lyrSources) && cfg.lyrSources.includes(s.id));
+  if (!enabled.length) return finish([], '', 0, []);
+  const strat = cfg.lyrStrategy === 'quality' ? 'quality' : 'race';
 
-  // 单源模式
-  if (strat !== 'race' && strat !== 'quality') {
-    const def = LYRIC_SOURCES.find((s) => s.id === strat) || LYRIC_SOURCES[0];
-    const r = await withTimeout(Promise.resolve().then(() => def.fn({ title, artist, duration })), 9000);
-    return finish(r && r.lines, r && r.lines && r.lines.length ? strat : '', r && r.dur, r && r.trans);
-  }
-
-  // 并发全部源
-  const ps = LYRIC_SOURCES.map((s) =>
+  const ps = enabled.map((s) =>
     withTimeout(Promise.resolve().then(() => s.fn({ title, artist, duration })), 9000)
       .then((r) => r ? {
         lines: (r.lines && r.lines.length) ? r.lines : [],

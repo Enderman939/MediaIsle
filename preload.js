@@ -42,4 +42,8 @@ contextBridge.exposeInMainWorld('island', {
   updateGet: () => ipcRenderer.invoke('update-get'),
   updateApply: () => ipcRenderer.invoke('update-apply'),
   onUpdateStatus: (cb) => ipcRenderer.on('update-status', (_e, v) => cb(v)),
+  // 运行日志
+  logGet: () => ipcRenderer.invoke('log-get'),
+  logClear: () => ipcRenderer.send('log-clear'),
+  onLogAppended: (cb) => ipcRenderer.on('log-appended', (_e, v) => cb(v)),
 });

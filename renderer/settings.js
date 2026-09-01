@@ -5,12 +5,13 @@
   const swBi = document.getElementById('swBi');
   const swAuto = document.getElementById('swAuto');
   const swFs = document.getElementById('swFs');
-  const selLyric = document.getElementById('selLyric');
-  const selLyricLabel = document.getElementById('selLyricLabel');
+  const selStrategy = document.getElementById('selStrategy');
   const rngLyr = document.getElementById('rngLyr');
   const rngLyrVal = document.getElementById('rngLyrVal');
   const rngDl = document.getElementById('rngDl');
   const rngDlVal = document.getElementById('rngDlVal');
+  const lyrChips = document.getElementById('lyrChips');
+  const logBox = document.getElementById('logBox');
   const updTitle = document.getElementById('updTitle');
   const updSub = document.getElementById('updSub');
   const btnUpdate = document.getElementById('btnUpdate');
@@ -31,6 +32,7 @@
       const target = btn.dataset.page;
       pages.forEach((pg) => pg.classList.toggle('active', pg.id === 'page-' + target));
       if (target === 'stats') refresh(); // 页面显示后重绘图表(隐藏时宽度为 0)
+      if (target === 'logs') loadLogs();
     });
   });
 
@@ -67,10 +69,13 @@
     swAuto.checked = !!cfg.autostart;
     swFs.checked = cfg.fsHide !== false;
     [swGlass, swDlyr, swBi, swAuto, swFs].forEach(syncSwitch);
-    selLyric.value = cfg.lyrics || 'race';
-    syncSelLabel(selLyric);
+    lyrSources = (Array.isArray(cfg.lyrSources) && cfg.lyrSources.length) ? cfg.lyrSources.slice() : ['soda', 'netease', 'qq', 'kugou'];
+    renderChips();
+    selStrategy.value = cfg.lyrStrategy === 'quality' ? 'quality' : 'race';
+    syncSelLabel(selStrategy);
     setRange(rngLyr, rngLyrVal, cfg.lyrSize || 12.5, (v) => v.toFixed(1));
     setRange(rngDl, rngDlVal, cfg.dlyrSize || 32, (v) => v + ' px');
+    if (cfg.version) document.getElementById('appVer').textContent = cfg.version;
   }
   function syncSelLabel(sel) {
     const label = sel.parentElement.querySelector('.md3-select__value');
@@ -112,10 +117,66 @@
   bindSwitch(swBi, 'bilingual');
   bindSwitch(swAuto, 'autostart');
   bindSwitch(swFs, 'fsHide');
-  bindSelect(selLyric, 'lyrics');
+  bindSelect(selStrategy, 'lyrStrategy');
   bindRange(rngLyr, rngLyrVal, 'lyrSize', (v) => v.toFixed(1));
   bindRange(rngDl, rngDlVal, 'dlyrSize', (v) => v + ' px');
+
+  // ---------------------------------------------------------------- 音源多选
+  let lyrSources = ['soda', 'netease', 'qq', 'kugou'];
+  function renderChips() {
+    [...lyrChips.children].forEach((ch) => ch.classList.toggle('on', lyrSources.includes(ch.dataset.id)));
+  }
+  lyrChips.addEventListener('click', async (e) => {
+    const ch = e.target.closest('.md3-chip');
+    if (!ch) return;
+    const id = ch.dataset.id;
+    if (lyrSources.includes(id)) {
+      if (lyrSources.length > 1) lyrSources = lyrSources.filter((x) => x !== id); // 至少保留一个
+    } else {
+      lyrSources.push(id);
+    }
+    renderChips();
+    await api.setCfg('lyrSources', lyrSources);
+  });
   api.getCfg().then(applyCfg).catch(() => { });
+
+  // ---------------------------------------------------------------- 日志页
+  let logsLoaded = false;
+  function fmtLogTime(t) {
+    const d = new Date(t);
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') + ':' + String(d.getSeconds()).padStart(2, '0');
+  }
+  function appendLogLine(entry) {
+    const div = document.createElement('div');
+    div.className = 'ln' + (entry.level === 'error' ? ' err' : '');
+    const ts = document.createElement('span');
+    ts.className = 'ts';
+    ts.textContent = fmtLogTime(entry.t);
+    div.appendChild(ts);
+    div.appendChild(document.createTextNode(entry.line));
+    logBox.appendChild(div);
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+  async function loadLogs() {
+    try {
+      const logs = await api.logGet();
+      logBox.innerHTML = '';
+      logs.forEach(appendLogLine);
+      logsLoaded = true;
+    } catch { }
+  }
+  if (api.onLogAppended) api.onLogAppended((entry) => {
+    if (!logsLoaded || !logBox.isConnected) return;
+    if (!document.getElementById('page-logs').classList.contains('active')) return;
+    appendLogLine(entry);
+  });
+  document.getElementById('btnLogClear').addEventListener('click', () => { api.logClear(); logBox.innerHTML = ''; });
+  document.getElementById('btnLogCopy').addEventListener('click', async () => {
+    try {
+      const text = [...logBox.children].map((d) => d.textContent).join('\n');
+      await navigator.clipboard.writeText(text);
+    } catch { }
+  });
 
   // ---------------------------------------------------------------- 自动更新
   async function refreshUpdate() {

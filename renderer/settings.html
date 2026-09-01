@@ -28,7 +28,7 @@
       <div class="md3-drawer__header">
         <div class="md3-drawer__meta">
           <div class="md3-drawer__name">MediaIsle</div>
-          <div class="md3-drawer__ver">版本 1.0.0</div>
+          <div class="md3-drawer__ver">版本 <span id="appVer">1.0.1</span></div>
         </div>
       </div>
       <nav class="md3-drawer__nav">
@@ -47,6 +47,14 @@
             </svg>
           </span>
           <span class="md3-nav-item__label">听歌数据</span>
+        </button>
+        <button class="md3-nav-item" data-page="logs">
+          <span class="md3-nav-item__icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 6h16M4 12h10M4 18h13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span class="md3-nav-item__label">日志</span>
         </button>
       </nav>
     </aside>
@@ -120,19 +128,27 @@
         <div class="md3-group">
           <div class="md3-row">
             <div class="md3-row__txt">
-              <div class="md3-row__headline">获取策略</div>
-              <div class="md3-row__support">汽水本地缓存 / 网易云 / QQ音乐 / 酷狗</div>
+              <div class="md3-row__headline">启用音源</div>
+              <div class="md3-row__support">任意组合，竞速下全部并发</div>
+            </div>
+            <div class="md3-chips" id="lyrChips">
+              <button class="md3-chip" data-id="soda">汽水</button>
+              <button class="md3-chip" data-id="netease">网易云</button>
+              <button class="md3-chip" data-id="qq">QQ</button>
+              <button class="md3-chip" data-id="kugou">酷狗</button>
+            </div>
+          </div>
+          <div class="md3-row">
+            <div class="md3-row__txt">
+              <div class="md3-row__headline">合并策略</div>
+              <div class="md3-row__support">竞速取最快命中，质量按末句时间比对择优</div>
             </div>
             <div class="md3-select">
-              <select id="selLyric" class="md3-select__native" aria-label="歌词获取策略">
+              <select id="selStrategy" class="md3-select__native" aria-label="歌词合并策略">
                 <option value="race">竞速 · 先到先得</option>
                 <option value="quality">质量 · 全源比对</option>
-                <option value="soda">汽水音乐 · 本地缓存</option>
-                <option value="netease">仅网易云</option>
-                <option value="qq">仅 QQ 音乐</option>
-                <option value="kugou">仅酷狗</option>
               </select>
-              <span class="md3-select__value" id="selLyricLabel"></span>
+              <span class="md3-select__value" id="selStrategyLabel"></span>
               <svg class="md3-select__arrow" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M7.4 9.2 12 13.8l4.6-4.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
@@ -166,8 +182,7 @@
           </div>
         </div>
 
-        <div class="md3-section-label">更新</div>
-        <div class="md3-group">
+        <div class="md3-section-label">更新</div>        <div class="md3-group">
           <div class="md3-row">
             <div class="md3-row__txt">
               <div class="md3-row__headline" id="updTitle">检查更新</div>
@@ -204,6 +219,16 @@
             </table>
           </div>
         </div>
+      </section>
+
+      <!-- 日志 -->
+      <section id="page-logs" class="md3-page">
+        <h1 class="md3-page-title">运行日志</h1>
+        <div class="md3-log-actions">
+          <button class="md3-btn md3-btn--tonal" id="btnLogCopy">复制全部</button>
+          <button class="md3-btn md3-btn--tonal" id="btnLogClear">清空</button>
+        </div>
+        <div class="md3-log" id="logBox"></div>
       </section>
 
     </main>

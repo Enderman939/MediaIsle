@@ -484,6 +484,76 @@ body {
 }
 .md3-btn:disabled { opacity: .45; cursor: default; }
 
+/* Filter Chips (MD3) */
+.md3-chips {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 250px;
+  justify-content: flex-end;
+}
+.md3-chip {
+  appearance: none;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: var(--md3-full, var(--md-sys-shape-corner-full));
+  border: 1px solid var(--md-sys-color-outline);
+  background: none;
+  font: var(--ts-label-medium);
+  letter-spacing: .5px;
+  color: var(--md-sys-color-on-surface-variant);
+  cursor: pointer;
+  transition: background-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+    color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+.md3-chip:hover { background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent); }
+.md3-chip.on {
+  background: var(--md-sys-color-secondary-container);
+  border-color: transparent;
+  color: var(--md-sys-color-on-secondary-container);
+}
+
+/* 日志页 */
+.md3-log-actions {
+  display: flex;
+  gap: 8px;
+  padding: 0 4px 12px;
+}
+.md3-btn--tonal {
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  height: 36px;
+  padding: 0 18px;
+}
+.md3-btn--tonal:hover {
+  background: color-mix(in srgb, var(--md-sys-color-on-secondary-container) 8%, var(--md-sys-color-secondary-container));
+  box-shadow: none;
+}
+.md3-log {
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  font-size: 11.5px;
+  line-height: 17px;
+  background: var(--md-sys-color-surface-container-lowest);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-medium);
+  padding: 12px 14px;
+  height: calc(100vh - 210px);
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+  cursor: text;
+}
+.md3-log::-webkit-scrollbar { width: 8px; }
+.md3-log::-webkit-scrollbar-thumb {
+  background: var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-full);
+}
+.md3-log .ln { color: var(--md-sys-color-on-surface-variant); }
+.md3-log .ln.err { color: var(--md-sys-color-error); }
+.md3-log .ln .ts { color: var(--md-sys-color-outline); margin-right: 8px; }
+
 /* ------------------------------------------------ 卡片 / 图表 */
 .md3-sum {
   font: var(--ts-body-medium);
