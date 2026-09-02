@@ -59,6 +59,7 @@
   let lyricsBuiltKey = '';  // 已构建的歌词 DOM 键
   let lyrEls = [];          // 虚拟窗口内的行元素
   let lineTrans = [];       // 行号 -> 翻译文本(时间戳对齐)
+  let lyrHeights = [];      // 虚拟窗口内各行的实测高度(长句换行后更高)
   let lyrWinStart = -1;     // 虚拟窗口起始行号
   let lyrLastY = 0;         // 轨道当前位移
   let lastDomIdx = -999;    // 已高亮的行号(-999 强制刷新)
@@ -535,6 +536,7 @@
     ylTrack.innerHTML = '';
     ylTrack.style.transform = 'translateY(0px)';
     lyrEls = [];
+    lyrHeights = [];
     lyrWinStart = -1;
     curLineIdx = -1;
     lastDomIdx = -999;
@@ -575,6 +577,8 @@
     }
     lyrWinStart = start;
     lastDomIdx = -999;
+    // 长句自动换行: 渲染后实测每行高度, 供滚动定位使用
+    lyrHeights = lyrEls.map((el) => el.offsetHeight || LYR_LINE_H);
   }
 
   function seekToLyric(idx) {
@@ -636,10 +640,11 @@
     if (curState() === 'expanded' || curState() === 'favlist') {
       ensureLyrWindow(lines, idx);
       if (idx !== lastDomIdx) {
-        // 平移量按累计行高计算(双语行更高), 当前行垂直居中
+        // 平移量按实测累计行高计算(长句换行/双语副行更高), 当前行垂直居中
+        const hAt = (k) => lyrHeights[k - lyrWinStart] || rowH(k);
         let cum = 0;
-        for (let k = lyrWinStart; k < idx; k++) cum += rowH(k);
-        const targetY = -(cum + rowH(idx) / 2);
+        for (let k = lyrWinStart; k < idx; k++) cum += hAt(k);
+        const targetY = -(cum + hAt(idx) / 2);
         const delta = Math.abs(targetY - lyrLastY);
         if (delta > LYR_LINE_H * 2.5) {
           // 大跳变(seek/换歌): 关闭过渡瞬移

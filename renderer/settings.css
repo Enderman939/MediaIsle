@@ -484,6 +484,29 @@ body {
 }
 .md3-btn:disabled { opacity: .45; cursor: default; }
 
+/* Linear Progress (MD3) - 更新下载进度 */
+.md3-progress-wrap { padding: 6px 16px 14px; }
+.md3-progress {
+  height: 4px;
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-surface-container-highest);
+  overflow: hidden;
+}
+.md3-progress__fill {
+  height: 100%;
+  width: 0%;
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-primary);
+  transition: width var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+.md3-progress__txt {
+  margin-top: 8px;
+  font: var(--ts-label-medium);
+  letter-spacing: .5px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Filter Chips (MD3) */
 .md3-chips {
   flex: none;

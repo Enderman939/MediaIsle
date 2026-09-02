@@ -181,6 +181,10 @@
   });
 
   // ---------------------------------------------------------------- 自动更新
+  const updProg = document.getElementById('updProg');
+  const updFill = document.getElementById('updFill');
+  const updTxt = document.getElementById('updTxt');
+  const mb = (n) => (n / 1048576).toFixed(1) + ' MB';
   async function refreshUpdate() {
     if (!api.updateGet) return;
     try {
@@ -189,11 +193,22 @@
         updTitle.textContent = '当前为源代码运行';
         updSub.textContent = '开发模式不检查更新';
         btnUpdate.hidden = true;
+        updProg.hidden = true;
         return;
       }
       const fmt = (d) => (Date.parse(d) > 0 ? new Date(d).toLocaleString('zh-CN', { hour12: false }) : '未知');
-      if (st.stage === 'download') { updTitle.textContent = '正在下载更新…'; updSub.textContent = '请稍候'; btnUpdate.disabled = true; btnUpdate.hidden = false; return; }
-      if (st.stage === 'extract') { updTitle.textContent = '正在解压更新…'; btnUpdate.disabled = true; btnUpdate.hidden = false; return; }
+      const prog = st.prog || {};
+      if (st.stage === 'download') {
+        updTitle.textContent = '正在下载更新…';
+        updSub.textContent = '下载完成后自动解压并重启';
+        updProg.hidden = false;
+        updFill.style.width = (prog.percent || 0).toFixed(1) + '%';
+        updTxt.textContent = (prog.total ? mb(prog.received) + ' / ' + mb(prog.total) + ' · ' : mb(prog.received) + ' · ')
+          + (prog.percent || 0).toFixed(1) + '% · ' + mb(prog.speed || 0) + '/s';
+        btnUpdate.disabled = true; btnUpdate.hidden = false; return;
+      }
+      updProg.hidden = true;
+      if (st.stage === 'extract') { updTitle.textContent = '正在解压更新…'; updSub.textContent = '请稍候'; btnUpdate.disabled = true; btnUpdate.hidden = false; return; }
       if (st.stage === 'restart') { updTitle.textContent = '即将重启完成更新…'; btnUpdate.disabled = true; btnUpdate.hidden = false; return; }
       if (st.stage === 'error') {
         updTitle.textContent = '更新失败';
@@ -202,6 +217,7 @@
         return;
       }
       btnUpdate.textContent = '立即更新';
+      updProg.hidden = true;
       if (st.available) {
         updTitle.textContent = '发现新版本' + (st.available.version ? ' (v' + st.available.version + ')' : '');
         updSub.textContent = '新构建 ' + fmt(st.available.buildDate) + ' · 当前构建 ' + fmt(st.localBuildDate);

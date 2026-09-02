@@ -462,6 +462,7 @@ let updateAvail = null;     // 最近一次检查的结果
 let updateStage = '';       // '' | 'download' | 'extract' | 'restart' | 'error'
 let updateBusy = false;
 let updateLastCheck = 0;
+let updateProg = { received: 0, total: 0, percent: 0, speed: 0 };
 
 function send2(ch, ...args) {
   send(ch, ...args);
@@ -508,10 +509,37 @@ async function applyUpdate() {
     const zipPath = path.join(dir, 'update.zip');
 
     updateStage = 'download';
+    updateProg = { received: 0, total: 0, percent: 0, speed: 0 };
     send2('update-status', { stage: updateStage });
     const res = await net.fetch('https://github.com/' + REPO + '/releases/latest/download/' + encodeURIComponent(avail.zip));
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    fs.writeFileSync(zipPath, Buffer.from(await res.arrayBuffer()));
+    // 流式下载: 实时计算已下载/总量/速度并推送 (限频 250ms)
+    const total = Number(res.headers.get('content-length')) || 0;
+    const reader = res.body.getReader();
+    const chunks = [];
+    let received = 0;
+    const t0 = Date.now();
+    let lastEmit = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      const now = Date.now();
+      if (now - lastEmit >= 250) {
+        lastEmit = now;
+        updateProg = {
+          received,
+          total,
+          percent: total ? (received / total) * 100 : 0,
+          speed: received / Math.max(0.5, (now - t0) / 1000),
+        };
+        send2('update-status', { stage: 'download', ...updateProg });
+      }
+    }
+    fs.writeFileSync(zipPath, Buffer.concat(chunks));
+    updateProg = { received, total, percent: 100, speed: updateProg.speed };
+    send2('update-status', { stage: 'download', ...updateProg });
 
     updateStage = 'extract';
     send2('update-status', { stage: updateStage });
@@ -555,7 +583,7 @@ async function applyUpdate() {
 
 ipcMain.handle('update-get', async () => {
   if (app.isPackaged && localBuildDate) await runUpdateCheck(false);
-  return { packaged: !!app.isPackaged, localBuildDate, available: updateAvail, stage: updateStage, busy: updateBusy };
+  return { packaged: !!app.isPackaged, localBuildDate, available: updateAvail, stage: updateStage, busy: updateBusy, prog: updateProg };
 });
 ipcMain.handle('update-apply', () => applyUpdate());
 
