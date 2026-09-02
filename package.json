@@ -1,6 +1,6 @@
 {
   "name": "mediaisle",
-  "version": "1.0.2+20260902.1918",
+  "version": "1.0.3+20260902.2019",
   "description": "MediaIsle - Dynamic Island style media controller for Windows",
   "productName": "MediaIsle",
   "main": "main.js",

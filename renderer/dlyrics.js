@@ -6,26 +6,30 @@
   let cur = null;
   let hideTimer = null;
 
-  // 超宽自动缩字号: 用隐藏测量元素实测文本宽度, 等比缩放 (保底 55%)
+  // 超宽自动缩字号: 测量含描边/字距的实际宽度, 缩放后二次校准, 不设下限(完整显示优先)
   const meas = document.createElement('span');
   meas.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;left:-9999px;top:0;';
   document.body.appendChild(meas);
   function fitEl(el) {
-    if (!el.textContent) { el.style.fontSize = ''; return; }
+    el.style.fontSize = '';
+    if (!el.textContent) return;
+    const maxW = window.innerWidth * 0.95;
     const cs = getComputedStyle(el);
+    const base = parseFloat(cs.fontSize);
     meas.style.fontWeight = cs.fontWeight;
     meas.style.fontFamily = cs.fontFamily;
     meas.style.letterSpacing = cs.letterSpacing;
-    meas.style.fontSize = cs.fontSize;
+    meas.style.webkitTextStroke = cs.webkitTextStroke;
+    meas.style.fontSize = base + 'px';
     meas.textContent = el.textContent;
-    const maxW = window.innerWidth * 0.96;
-    const w = meas.offsetWidth;
-    if (w > maxW && w > 0) {
-      const scale = Math.max(0.55, maxW / w);
-      el.style.fontSize = (parseFloat(cs.fontSize) * scale).toFixed(1) + 'px';
-    } else {
-      el.style.fontSize = '';
-    }
+    let w = meas.offsetWidth;
+    if (w <= maxW) return;
+    let size = base * Math.max(0.4, maxW / w);
+    // 二次校准: 描边/取整带来的误差
+    meas.style.fontSize = size + 'px';
+    const w2 = meas.offsetWidth;
+    if (w2 > maxW) size = size * (maxW / w2);
+    el.style.fontSize = size.toFixed(1) + 'px';
   }
   window.addEventListener('resize', () => { fitEl(el); fitEl(sub); });
 
