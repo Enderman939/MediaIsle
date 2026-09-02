@@ -497,6 +497,120 @@ async function runUpdateCheck(force) {
   return updateAvail;
 }
 
+// ---------------------------------------------------------------- 更新下载
+// 多连接分段并行: GitHub 大文件单连接在国内环境极慢, 32 段 8 并发可成倍提速;
+// 任一段失败自动重试, Range 不可用/并行失败整体回退单流直连
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function emitDownloadProgress(received, total, t0) {
+  const now = Date.now();
+  if (now - (emitDownloadProgress._last || 0) < 250) return;
+  emitDownloadProgress._last = now;
+  updateProg = {
+    received,
+    total,
+    percent: total ? (received / total) * 100 : 0,
+    speed: received / Math.max(0.5, (now - t0) / 1000),
+  };
+  send2('update-status', { stage: 'download', ...updateProg });
+}
+
+async function singleDownload(url) {
+  const res = await net.fetch(url);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const total = Number(res.headers.get('content-length')) || 0;
+  const reader = res.body.getReader();
+  const chunks = [];
+  let received = 0;
+  const t0 = Date.now();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    emitDownloadProgress(received, total, t0);
+  }
+  emitDownloadProgress._last = 0;
+  updateProg = { received, total, percent: 100, speed: updateProg.speed };
+  send2('update-status', { stage: 'download', ...updateProg });
+  return Buffer.concat(chunks);
+}
+
+async function parallelDownload(url, total) {
+  const big = Buffer.alloc(total);
+  const SEGMENTS = 32;
+  const CONCURRENCY = 8;
+  const segSize = Math.ceil(total / SEGMENTS);
+  let nextSeg = 0;
+  let doneBytes = 0;
+  const t0 = Date.now();
+  let lastEmit = 0;
+  const prog = () => {
+    const now = Date.now();
+    if (now - lastEmit < 250) return;
+    lastEmit = now;
+    updateProg = {
+      received: doneBytes,
+      total,
+      percent: (doneBytes / total) * 100,
+      speed: doneBytes / Math.max(0.5, (now - t0) / 1000),
+    };
+    send2('update-status', { stage: 'download', ...updateProg });
+  };
+  const grab = async (i) => {
+    const start = i * segSize;
+    const end = Math.min(total, start + segSize) - 1;
+    if (start > end) return;
+    let lastErr = null;
+    for (let t = 0; t < 3; t++) {
+      try {
+        const r = await net.fetch(url, { headers: { Range: `bytes=${start}-${end}` } });
+        if (r.status !== 206) throw new Error('RANGE_UNSUPPORTED(' + r.status + ')');
+        const buf = Buffer.from(await r.arrayBuffer());
+        if (buf.length !== end - start + 1) throw new Error('SIZE_MISMATCH');
+        big.set(buf, start);
+        doneBytes += buf.length;
+        prog();
+        return;
+      } catch (e) {
+        lastErr = e;
+        if (String(e.message || '').startsWith('RANGE_UNSUPPORTED')) throw e;
+        await sleep(400);
+      }
+    }
+    throw lastErr;
+  };
+  await Promise.all(Array.from({ length: CONCURRENCY }, () => (async () => {
+    for (;;) {
+      const i = nextSeg++;
+      if (i >= SEGMENTS) return;
+      await grab(i);
+    }
+  })()));
+  if (doneBytes !== total) throw new Error('INCOMPLETE ' + doneBytes + '/' + total);
+  emitDownloadProgress._last = 0;
+  updateProg = { received: total, total, percent: 100, speed: updateProg.speed };
+  return big;
+}
+
+async function downloadUpdate(url) {
+  let total = 0;
+  let ranges = false;
+  try {
+    const head = await net.fetch(url, { method: 'HEAD' });
+    total = Number(head.headers.get('content-length')) || 0;
+    ranges = (head.headers.get('accept-ranges') || '').toLowerCase().includes('bytes');
+  } catch { }
+  if (total > 0 && ranges && total >= 8 * 1048576) {
+    try {
+      return await parallelDownload(url, total);
+    } catch (e) {
+      console.error('[update] 并行下载失败, 回退单流:', (e && e.message) || e);
+    }
+  }
+  return await singleDownload(url);
+}
+
 async function applyUpdate() {
   if (!app.isPackaged || updateBusy) return false;
   const avail = updateAvail || await runUpdateCheck(true);
@@ -511,35 +625,8 @@ async function applyUpdate() {
     updateStage = 'download';
     updateProg = { received: 0, total: 0, percent: 0, speed: 0 };
     send2('update-status', { stage: updateStage });
-    const res = await net.fetch('https://github.com/' + REPO + '/releases/latest/download/' + encodeURIComponent(avail.zip));
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    // 流式下载: 实时计算已下载/总量/速度并推送 (限频 250ms)
-    const total = Number(res.headers.get('content-length')) || 0;
-    const reader = res.body.getReader();
-    const chunks = [];
-    let received = 0;
-    const t0 = Date.now();
-    let lastEmit = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      received += value.length;
-      const now = Date.now();
-      if (now - lastEmit >= 250) {
-        lastEmit = now;
-        updateProg = {
-          received,
-          total,
-          percent: total ? (received / total) * 100 : 0,
-          speed: received / Math.max(0.5, (now - t0) / 1000),
-        };
-        send2('update-status', { stage: 'download', ...updateProg });
-      }
-    }
-    fs.writeFileSync(zipPath, Buffer.concat(chunks));
-    updateProg = { received, total, percent: 100, speed: updateProg.speed };
-    send2('update-status', { stage: 'download', ...updateProg });
+    const data = await downloadUpdate('https://github.com/' + REPO + '/releases/latest/download/' + encodeURIComponent(avail.zip));
+    fs.writeFileSync(zipPath, data);
 
     updateStage = 'extract';
     send2('update-status', { stage: updateStage });
