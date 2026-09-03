@@ -48,6 +48,14 @@
           </span>
           <span class="md3-nav-item__label">听歌数据</span>
         </button>
+        <button class="md3-nav-item" data-page="mixer">
+          <span class="md3-nav-item__icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 10v4M9 6v12M13 9v6M17 4v16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span class="md3-nav-item__label">混音器</span>
+        </button>
         <button class="md3-nav-item" data-page="logs">
           <span class="md3-nav-item__icon">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -55,6 +63,14 @@
             </svg>
           </span>
           <span class="md3-nav-item__label">日志</span>
+        </button>
+        <button class="md3-nav-item" data-page="mixer">
+          <span class="md3-nav-item__icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 10v4M9 6v12M13 9v6M17 4v16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span class="md3-nav-item__label">混音器</span>
         </button>
       </nav>
     </aside>
@@ -121,6 +137,52 @@
               <input type="checkbox" id="swFs" aria-label="全屏时自动隐藏">
               <span class="md3-switch__track"></span>
             </label>
+          </div>
+          <div class="md3-row">
+            <div class="md3-row__txt">
+              <div class="md3-row__headline">任务栏图标</div>
+              <div class="md3-row__support">显示任务栏图标与播放控制按钮</div>
+            </div>
+            <label class="md3-switch">
+              <input type="checkbox" id="swTb" aria-label="任务栏图标">
+              <span class="md3-switch__track"></span>
+            </label>
+          </div>
+          <div class="md3-row">
+            <div class="md3-row__txt">
+              <div class="md3-row__headline">岛体位置</div>
+              <div class="md3-row__support">屏幕边缘停靠位置</div>
+            </div>
+            <div class="md3-select">
+              <select id="selPos" class="md3-select__native" aria-label="岛体位置">
+                <option value="top">顶部居中</option>
+                <option value="bottom">底部居中</option>
+              </select>
+              <span class="md3-select__value" id="selPosLabel"></span>
+              <svg class="md3-select__arrow" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7.4 9.2 12 13.8l4.6-4.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+          </div>
+          <div class="md3-row">
+            <div class="md3-row__txt">
+              <div class="md3-row__headline">定时停止</div>
+              <div class="md3-row__support" id="sleepSub">到时自动暂停播放</div>
+            </div>
+            <div class="md3-select">
+              <select id="selSleep" class="md3-select__native" aria-label="定时停止">
+                <option value="0">关闭</option>
+                <option value="15">15 分钟</option>
+                <option value="30">30 分钟</option>
+                <option value="45">45 分钟</option>
+                <option value="60">60 分钟</option>
+                <option value="90">90 分钟</option>
+              </select>
+              <span class="md3-select__value" id="selSleepLabel"></span>
+              <svg class="md3-select__arrow" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7.4 9.2 12 13.8l4.6-4.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
           </div>
         </div>
 
@@ -223,6 +285,11 @@
           <canvas id="chartTop" height="180"></canvas>
         </div>
 
+        <div class="md3-actions">
+          <button class="md3-btn md3-btn--tonal" id="btnReport">生成报告图</button>
+          <button class="md3-btn md3-btn--tonal" id="btnExport">导出备份</button>
+          <button class="md3-btn md3-btn--tonal" id="btnImport">导入备份</button>
+        </div>
         <div class="md3-card md3-card--table">
           <div class="md3-tbl-box">
             <table class="md3-table">
@@ -233,6 +300,18 @@
             </table>
           </div>
         </div>
+
+        <div class="md3-card">
+          <div class="md3-card__title">最近播放</div>
+          <div class="md3-hist" id="histList"></div>
+        </div>
+      </section>
+
+      <!-- 混音器 -->
+      <section id="page-mixer" class="md3-page">
+        <h1 class="md3-page-title">音量混音器</h1>
+        <div class="md3-sum" id="mixerHint">调节各应用在系统混音器中的音量（悬停任务栏图标也可控制播放）</div>
+        <div class="md3-group" id="mixerList"></div>
       </section>
 
       <!-- 日志 -->

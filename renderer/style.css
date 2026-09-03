@@ -87,7 +87,8 @@ body {
 #island[data-state="notify"]         .face-notify,
 #island[data-state="expanded"]       .face-expanded,
 #island[data-state="expanded-empty"] .face-empty,
-#island[data-state="favlist"]        .face-favlist {
+#island[data-state="favlist"]        .face-favlist,
+#island[data-state="lyrpick"]        .face-lyrpick {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
@@ -493,6 +494,17 @@ body.glass .e-lyrics::after  { background: linear-gradient(rgba(24,24,30,0), rgb
 }
 .yl-line.on .yl-sub { color: rgba(255, 255, 255, .52); }
 
+/* 逐字卡拉OK: 词级染色 (仅活动行生效) */
+.yl-line .k-w { color: rgba(255, 255, 255, .34); }
+.yl-line.on .k-w.done { color: #fff; }
+.yl-line.on .k-w.cur {
+  background: linear-gradient(90deg, #fff var(--p, 0%), rgba(255, 255, 255, .34) var(--p, 0%));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
 /* ---------------------------------------------------------------- 底部行(音源chips + 统计) */
 .e-foot {
   display: flex;
@@ -573,8 +585,8 @@ body.glass .e-lyrics::after  { background: linear-gradient(rgba(24,24,30,0), rgb
   text-overflow: ellipsis;
 }
 
-/* ---------------------------------------------------------------- 收藏列表面板 */
-.face-favlist { flex-direction: column; padding: 14px 16px; gap: 8px; }
+/* ---------------------------------------------------------------- 收藏列表面板 / 歌词纠错面板 */
+.face-favlist, .face-lyrpick { flex-direction: column; padding: 14px 16px; gap: 8px; }
 .fl-head { display: flex; align-items: center; gap: 10px; flex: none; }
 .fl-title { flex: 1; font-size: 14px; font-weight: 600; color: #fff; }
 .fl-count { font-size: 11px; color: rgba(255, 255, 255, .4); }
@@ -634,6 +646,22 @@ body.glass .e-lyrics::after  { background: linear-gradient(rgba(24,24,30,0), rgb
   color: rgba(255, 255, 255, .35);
   line-height: 1.7;
 }
+
+/* 候选来源标签 */
+.fl-src {
+  flex: none;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(208, 188, 255, .16);
+  color: #d0bcff;
+}
+
+/* 展开面板底部纠错按钮 */
+.e-foot .btn-xs { color: rgba(255, 255, 255, .55); }
+.e-foot .btn-xs svg { width: 15px; height: 15px; }
+.e-foot .btn-xs:hover { color: rgba(255, 255, 255, .85); }
 
 /* ---------------------------------------------------------------- 毛玻璃模式 (模拟半透明) */
 body.glass #island {

@@ -5,7 +5,7 @@
 //  - 默认鼠标穿透, 悬停岛内时恢复交互
 //  - 通过 PowerShell 桥接(bridge.ps1)读取/控制系统媒体(SMTC)
 // =====================================================================
-const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage, net } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage, net, dialog } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -89,7 +89,7 @@ ipcMain.on('log-clear', () => { logBuf.length = 0; });
 
 // 配置持久化(毛玻璃/桌面歌词)
 const CFG_FILE = path.join(app.getPath('userData'), 'config.json');
-let cfg = { glass: false, dlyr: false, fsHide: true, bilingual: true, lyrSize: 12.5, dlyrSize: 32, dlyrSubSize: 17, lyrSources: ['soda', 'netease', 'qq', 'kugou'], lyrStrategy: 'race' };
+let cfg = { glass: false, dlyr: false, fsHide: true, bilingual: true, lyrSize: 12.5, dlyrSize: 32, dlyrSubSize: 17, islandPos: 'top', taskbar: false, lyrSources: ['soda', 'netease', 'qq', 'kugou'], lyrStrategy: 'race' };
 try {
   const raw = fs.readFileSync(CFG_FILE, 'utf8').replace(/^\uFEFF/, '');
   Object.assign(cfg, JSON.parse(raw));
@@ -167,6 +167,10 @@ function bumpStats(msg) {
   if (key !== stats.lastPlayKey) {
     tr.plays += 1;
     stats.lastPlayKey = key;
+    // 播放历史时间线
+    stats.history = stats.history || [];
+    stats.history.push({ t: Date.now(), title: msg.title, artist: msg.artist || '', src: msg.source || '' });
+    if (stats.history.length > 2000) stats.history.splice(0, stats.history.length - 2000);
   }
 
   // 曲目数上限: 超出淘汰最久未播的
@@ -208,9 +212,12 @@ function send(ch, ...args) {
 function positionWindow() {
   if (!win) return;
   const { workArea } = screen.getPrimaryDisplay();
+  const y = cfg.islandPos === 'bottom'
+    ? workArea.y + workArea.height - WIN_H - 8
+    : workArea.y + WIN_TOP_GAP;
   win.setPosition(
     Math.round(workArea.x + (workArea.width - WIN_W) / 2),
-    workArea.y + WIN_TOP_GAP,
+    Math.round(y),
     false
   );
 }
@@ -226,7 +233,7 @@ function createWindow() {
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
-    skipTaskbar: true,
+    skipTaskbar: !cfg.taskbar,
     alwaysOnTop: true,
     hasShadow: false,
     focusable: false,       // 不抢焦点
@@ -332,8 +339,12 @@ function handleBridgeLine(msg) {
     win.webContents.send('media-state', msg);
   } else if (msg.type === 'error') {
     logErr('[bridge]', msg.message);
+    if (msg.status && msg.status !== lastBridgeStatus) { lastBridgeStatus = msg.status; updateThumbar(); }
   } else if (msg.type === 'volume') {
     send('volume-changed', msg);
+  } else if (msg.type === 'mixer') {
+    mixerCache = Array.isArray(msg.list) ? msg.list : [];
+    if (setWin && !setWin.isDestroyed()) setWin.webContents.send('mixer-list', mixerCache);
   } else if (msg.type === 'fs') {
     // 全屏应用前台时隐藏岛体, 退出全屏恢复 (可在设置中关闭)
     if (msg.v && cfg.fsHide && win && win.isVisible() && !hoverInside) {
@@ -346,12 +357,13 @@ function handleBridgeLine(msg) {
   }
 }
 
-function sendCommand(cmd, val) {
+function sendCommand(cmd, val, extra) {
   // 数值 -> position(seek/volume), 字符串 -> appId(switch-source)
   let payload;
   if (typeof val === 'number' && isFinite(val)) payload = { cmd, position: val };
   else if (typeof val === 'string' && val.length) payload = { cmd, appId: val };
   else payload = { cmd };
+  if (extra) Object.assign(payload, extra);
   try {
     // 追加写入命令文件(先写临时文件再原子替换, 避免桥接读到半行)
     let content = JSON.stringify(payload) + '\n';
@@ -379,6 +391,7 @@ const ISLAND_RECTS = {
   expanded:       { w: 672, h: 214 },
   'expanded-empty': { w: 406, h: 214 },
   favlist:        { w: 406, h: 214 },
+  lyrpick:        { w: 406, h: 214 },
 };
 const ISLAND_TOP = 3; // 岛距窗口顶部偏移(stage padding-top)
 
@@ -667,11 +680,132 @@ async function applyUpdate() {
   }
 }
 
+// ---------------------------------------------------------------- 音量混音器
+let mixerCache = [];
+ipcMain.handle('mixer-get', () => {
+  sendCommand('mixer-list');
+  return mixerCache;
+});
+ipcMain.on('mixer-set', (_e, pid, vol) => {
+  sendCommand('mixer-set', Number(vol) || 0, { pid: Number(pid) || 0 });
+});
+
+// ---------------------------------------------------------------- 任务栏播放控制按钮
+let thumbarIcons = null;
+let lastBridgeStatus = '';
+let lastThumbarState = null;
+function getThumbarIcons() {
+  if (!thumbarIcons) {
+    const p = (n) => nativeImage.createFromPath(path.join(__dirname, 'assets', 'thumbar', n));
+    thumbarIcons = { prev: p('prev.png'), play: p('play.png'), pause: p('pause.png'), next: p('next.png') };
+  }
+  return thumbarIcons;
+}
+function updateThumbar() {
+  try {
+    if (!win || win.isDestroyed() || process.platform !== 'win32' || !cfg.taskbar) return;
+    const playing = lastBridgeStatus === 'Playing' || lastBridgeStatus === 'Changing';
+    if (playing === lastThumbarState) return;
+    lastThumbarState = playing;
+    const ic = getThumbarIcons();
+    win.setThumbarButtons([
+      { tooltip: '上一首', icon: ic.prev, click: () => sendCommand('prev') },
+      { tooltip: playing ? '暂停' : '播放', icon: playing ? ic.pause : ic.play, click: () => sendCommand('toggle') },
+      { tooltip: '下一首', icon: ic.next, click: () => sendCommand('next') },
+    ]);
+  } catch { }
+}
+
 ipcMain.handle('update-get', async () => {
   if (app.isPackaged && localBuildDate) await runUpdateCheck(false);
   return { packaged: !!app.isPackaged, localBuildDate, available: updateAvail, stage: updateStage, busy: updateBusy, prog: updateProg };
 });
 ipcMain.handle('update-apply', () => applyUpdate());
+
+// ---------------------------------------------------------------- 备份导入/导出 + 定时停止
+ipcMain.handle('backup-export', async (_e, favs) => {
+  try {
+    const win2 = BrowserWindow.getFocusedWindow() || win || setWin;
+    const res = await dialog.showSaveDialog(win2, {
+      title: '导出备份',
+      defaultPath: 'MediaIsle-备份-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '.json',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    });
+    if (res.canceled || !res.filePath) return { ok: false };
+    const data = {
+      app: 'MediaIsle',
+      version: app.getVersion(),
+      exportedAt: new Date().toISOString(),
+      config: cfg,
+      stats,
+      favs: favs || {},
+    };
+    fs.writeFileSync(res.filePath, JSON.stringify(data, null, 2));
+    return { ok: true, path: res.filePath };
+  } catch (e) {
+    return { ok: false, message: (e && e.message) || String(e) };
+  }
+});
+
+ipcMain.handle('backup-import', async (_e, favs) => {
+  try {
+    const win2 = BrowserWindow.getFocusedWindow() || win || setWin;
+    const res = await dialog.showOpenDialog(win2, {
+      title: '导入备份',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+      properties: ['openFile'],
+    });
+    if (res.canceled || !res.filePaths || !res.filePaths[0]) return { ok: false };
+    const data = JSON.parse(fs.readFileSync(res.filePaths[0], 'utf8').replace(/^\uFEFF/, ''));
+    if (data.app !== 'MediaIsle') return { ok: false, message: '不是 MediaIsle 备份文件' };
+    // 配置: 仅接受已知字段
+    if (data.config && typeof data.config === 'object') {
+      for (const k of Object.keys(cfg)) {
+        if (data.config[k] !== undefined) cfg[k] = data.config[k];
+      }
+      saveCfg();
+      // 推送全部显示相关状态
+      send('glass-changed', !!cfg.glass);
+      send('bilingual-changed', cfg.bilingual !== false);
+      send('lyr-size-changed', cfg.lyrSize || 12.5);
+      try { if (win && !win.isDestroyed()) win.setSkipTaskbar(!cfg.taskbar); } catch { }
+      try { if (dlWin && !dlWin.isDestroyed()) dlWin.webContents.send('dl-style', { size: cfg.dlyrSize || 32, subSize: cfg.dlyrSubSize || 17 }); } catch { }
+      if (cfg.dlyr) ensureDlyrics(); else closeDlyrics();
+    }
+    // 统计
+    if (data.stats && typeof data.stats === 'object') {
+      stats.days = data.stats.days || {};
+      stats.tracks = data.stats.tracks || {};
+      stats.history = data.stats.history || [];
+      stats.lastPlayKey = data.stats.lastPlayKey || '';
+      try { fs.writeFileSync(STATS_FILE, JSON.stringify(stats)); } catch { }
+      if (setWin && !setWin.isDestroyed()) setWin.webContents.send('stats-updated');
+    }
+    return { ok: true, config: JSON.parse(JSON.stringify(cfg)), favs: data.favs || {} };
+  } catch (e) {
+    return { ok: false, message: (e && e.message) || String(e) };
+  }
+});
+
+// 定时停止 (会话级, 不持久化)
+let sleepEndAt = 0;
+let sleepTimerHandle = null;
+ipcMain.handle('sleep-get', () => ({ endAt: sleepEndAt }));
+ipcMain.handle('sleep-set', (_e, minutes) => {
+  if (sleepTimerHandle) { clearTimeout(sleepTimerHandle); sleepTimerHandle = null; }
+  sleepEndAt = 0;
+  const n = Number(minutes);
+  if (isFinite(n) && n > 0) {
+    sleepEndAt = Date.now() + n * 60e3;
+    sleepTimerHandle = setTimeout(() => {
+      sleepEndAt = 0;
+      sleepTimerHandle = null;
+      sendCommand('pause');
+      try { tray.displayBalloon({ title: 'MediaIsle', content: '定时时间到，已暂停播放' }); } catch { }
+    }, n * 60e3);
+  }
+  return { endAt: sleepEndAt };
+});
 
 // ---------------------------------------------------------------- 设置窗口
 let setWin = null;
@@ -716,6 +850,8 @@ ipcMain.handle('cfg-get', () => ({
   lyrSize: cfg.lyrSize || 12.5,
   dlyrSize: cfg.dlyrSize || 32,
   dlyrSubSize: cfg.dlyrSubSize || 17,
+  islandPos: cfg.islandPos === 'bottom' ? 'bottom' : 'top',
+  taskbar: !!cfg.taskbar,
   version: app.getVersion(),
 }));
 
@@ -783,6 +919,21 @@ ipcMain.handle('cfg-set', (_e, key, val) => {
       hiddenByFs = false;
       if (!hiddenByUser && win && !win.isDestroyed()) win.showInactive();
     }
+  } else if (key === 'islandPos') {
+    if (val === 'top' || val === 'bottom') {
+      cfg.islandPos = val;
+      saveCfg();
+      positionWindow();
+    }
+  } else if (key === 'taskbar') {
+    cfg.taskbar = !!val;
+    saveCfg();
+    try {
+      if (win && !win.isDestroyed()) {
+        win.setSkipTaskbar(!cfg.taskbar);
+        updateThumbar();
+      }
+    } catch { }
   }
   return {
     glass: !!cfg.glass,
@@ -795,6 +946,8 @@ ipcMain.handle('cfg-set', (_e, key, val) => {
     lyrSize: cfg.lyrSize || 12.5,
     dlyrSize: cfg.dlyrSize || 32,
     dlyrSubSize: cfg.dlyrSubSize || 17,
+    islandPos: cfg.islandPos === 'bottom' ? 'bottom' : 'top',
+    taskbar: !!cfg.taskbar,
     version: app.getVersion(),
   };
 });
@@ -1109,6 +1262,7 @@ function readSodaCatalog() {
         const lyr = (resp && resp.lyric) || md.lyrics;
         if (!tr || !tr.name || !lyr || !lyr.content) continue;
         out.push({
+          id: String(tr.id || ''),
           name: tr.name,
           artists: (Array.isArray(tr.artists) ? tr.artists : []).map((a) => a.name || '').filter(Boolean).join('/'),
           dur: (tr.duration && tr.duration > 0) ? tr.duration / 1000 : 0,
@@ -1128,10 +1282,20 @@ function parseSodaContent(text) {
   const out = [];
   const lrcRest = [];
   for (const ln of String(text || '').split(/\r?\n/)) {
-    const m = /^\[(\d+),(\d+)\]/.exec(ln);
+    const m = /^\[(\d+),(\d+)\](.*)$/.exec(ln.trim());
     if (m) {
-      const x = ln.replace(/^\[[^\]]*\]/, '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
-      if (x) out.push({ t: parseInt(m[1], 10) / 1000, x });
+      const lineStart = parseInt(m[1], 10);
+      const body = m[3];
+      // 逐字时间轴: <rel,dur,0>词
+      const words = [];
+      const wm = /<(\d+),(\d+),\d+>([^<]*)/g;
+      let w;
+      while ((w = wm.exec(body))) {
+        const wx = w[3];
+        if (wx) words.push({ t: (lineStart + parseInt(w[1], 10)) / 1000, d: parseInt(w[2], 10) / 1000, x: wx });
+      }
+      const x = (words.length ? words.map((v) => v.x).join('') : body.replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim();
+      if (x) out.push({ t: lineStart / 1000, x, w: words.length ? words : undefined });
     } else {
       lrcRest.push(ln);
     }
@@ -1182,8 +1346,17 @@ function parseKrc(b64) {
     if (!line.startsWith('[')) continue;
     const m = /^\[(\d+),(\d+)\](.*)$/.exec(line);
     if (m) {
-      const x = m[3].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
-      entries.push({ t: parseInt(m[1], 10) / 1000, x });
+      const lineStart = parseInt(m[1], 10);
+      const body = m[3];
+      const words = [];
+      const wm = /<(\d+),(\d+),\d+>([^<]*)/g;
+      let w;
+      while ((w = wm.exec(body))) {
+        const wx = w[3];
+        if (wx) words.push({ t: (lineStart + parseInt(w[1], 10)) / 1000, d: parseInt(w[2], 10) / 1000, x: wx });
+      }
+      const x = (words.length ? words.map((v) => v.x).join('') : body.replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim();
+      entries.push({ t: lineStart / 1000, x, w: words.length ? words : undefined });
       continue;
     }
     const tg = /^\[(\w+):([^\]]*)\]$/.exec(line);
@@ -1269,9 +1442,18 @@ const LYRIC_SOURCES = [
 
 async function fetchLyrics(query) {
   const { title, artist, duration } = query || {};
-  if (!title) return { lines: [], src: '' };
+  if (!title) return { lines: [], src: '', dur: 0 };
   const key = (title + '|' + artist).toLowerCase();
   if (lyrCache.has(key)) return lyrCache.get(key);
+
+  // 用户手动选定的歌词优先
+  const pick = lyrPicks[key];
+  if (pick) {
+    try {
+      const r = await fetchLyricByKey(pick.src, pick.key);
+      if (r && r.lines && r.lines.length) return finish(r.lines, pick.src + ' · 手动', r.dur, r.trans);
+    } catch { }
+  }
 
   const finish = (lines, src, dur, trans) => {
     const r = { lines: lines || [], src: src || '', dur: dur || 0, trans: trans || [] };
@@ -1329,6 +1511,113 @@ async function fetchLyrics(query) {
   });
   return best ? finish(best.lines, best.src, best.dur, best.trans) : finish([], '', bestDur, bestTrans);
 }
+// ---------------------------------------------------------------- 歌词手动纠错
+// 用户在候选列表手动选定歌词源与版本, 按曲目记忆 (lyr-picks.json),
+// fetchLyrics 命中手选记录时优先按选定源抓取
+let lyrPicks = {};
+try { lyrPicks = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'lyr-picks.json'), 'utf8')); } catch { }
+function savePicks() {
+  try { fs.writeFileSync(path.join(app.getPath('userData'), 'lyr-picks.json'), JSON.stringify(lyrPicks)); } catch { }
+}
+
+async function fetchLyricByKey(src, key) {
+  if (src === 'soda') {
+    const cats = readSodaCatalog();
+    const hit = cats.find((c) => String(c.id) === String(key));
+    if (!hit) return null;
+    const entries = parseSodaContent(hit.c);
+    if (!entries.length) return null;
+    const lines = entries.map(({ t, x, w }) => (w ? { t, x, w } : { t, x }));
+    return { lines, trans: hit.t ? parseLrc(hit.t) : [], dur: hit.dur || 0 };
+  }
+  if (src === 'netease') {
+    const lr = await httpJson(`https://music.163.com/api/song/lyric?os=pc&id=${key}&lv=-1&kv=-1&tv=-1`, { ...H_UA, Referer: 'https://music.163.com/' });
+    const lines = parseLrc(lr && lr.lrc && lr.lrc.lyric);
+    if (!lines.length) return null;
+    return { lines, trans: parseLrc(lr && lr.tlyric && lr.tlyric.lyric), dur: 0 };
+  }
+  if (src === 'qq') {
+    const lr = await httpJson(`https://u.y.qq.com/cgi-bin/musicu.fcg?format=json&data=${encodeURIComponent(JSON.stringify({ comm: { ct: 19, cv: 1873, uin: '' }, req_1: { module: 'music.musichallSong.PlayLyricInfo', method: 'GetPlayLyricInfo', param: { songMID: key, songID: 0, isFormat: false, trans: 1 } } }))}`, { ...H_UA, Referer: 'https://y.qq.com/' });
+    const d = lr && lr.req_1 && lr.req_1.data;
+    const lines = parseLrc(maybeB64(d && d.lyric));
+    if (!lines.length) return null;
+    return { lines, trans: parseLrc(maybeB64(d && d.trans)), dur: 0 };
+  }
+  if (src === 'kugou') {
+    const [hash, aaid] = String(key).split('|');
+    const cs = await httpJson(`https://krcs.kugou.com/search?ver=1&man=yes&client=mobi&hash=${hash}&album_audio_id=${aaid || ''}`, H_UA);
+    const cand = cs && cs.candidates && cs.candidates[0];
+    if (!cand || !cand.id) return null;
+    const aKey = cand.accesskey || cand.access_key || '';
+    const kr = await httpJson(`https://lyrics.kugou.com/download?ver=1&client=pc&id=${cand.id}&accesskey=${aKey}&fmt=krc&charset=utf8`, H_UA);
+    if (kr && kr.content) {
+      const parsed = parseKrc(kr.content);
+      const lines = parsed ? parsed.entries.map(({ t, x, w }) => (w ? { t, x, w } : { t, x })) : [];
+      if (lines.length) return { lines, trans: parsed.trans, dur: 0 };
+    }
+    return null;
+  }
+  return null;
+}
+
+ipcMain.handle('lyr-candidates', async (_e, q) => {
+  const { title, artist, duration } = q || {};
+  if (!title) return [];
+  const out = [];
+  const ac = new AbortController();
+  const tm = setTimeout(() => ac.abort(), 8000);
+  try {
+    const kw = encodeURIComponent(`${title} ${artist || ''}`.trim());
+    // 汽水: 本地缓存目录匹配
+    try {
+      for (const c of readSodaCatalog()) {
+        const ts = titleScore(c.name, title);
+        if (ts < 0.55) continue;
+        out.push({ src: 'soda', key: c.id, name: c.name, artist: c.artists, dur: Math.round(c.dur), score: ts });
+      }
+    } catch { }
+    // 网易云
+    try {
+      const sr = await httpJson(`https://music.163.com/api/search/get/web?s=${kw}&type=1&offset=0&limit=3`, { ...H_UA, Referer: 'https://music.163.com/' }, ac.signal);
+      for (const s of ((sr.result && sr.result.songs) || []).slice(0, 3)) {
+        out.push({ src: 'netease', key: String(s.id), name: s.name, artist: (s.artists || []).map((a) => a.name).join('/'), dur: s.duration > 0 ? Math.round(s.duration / 1000) : 0 });
+      }
+    } catch { }
+    // QQ
+    try {
+      const sr = await httpJson(`https://c.y.qq.com/soso/fcgi-bin/client_search_cp?w=${kw}&format=json&n=3`, { ...H_UA, Referer: 'https://y.qq.com/' }, ac.signal);
+      for (const s of (((sr.data || {}).song || {}).list || []).slice(0, 3)) {
+        out.push({ src: 'qq', key: s.songmid, name: s.songname, artist: (s.singer || []).map((a) => a.name).join('/'), dur: s.interval || 0 });
+      }
+    } catch { }
+    // 酷狗
+    try {
+      const sr = await httpJson(`http://mobilecdn.kugou.com/api/v3/search/song?format=json&keyword=${kw}&page=1&pagesize=3`, H_UA, ac.signal);
+      for (const s of (((sr.data || {}).info) || []).slice(0, 3)) {
+        out.push({ src: 'kugou', key: s.hash + '|' + (s.album_audio_id || ''), name: s.songname, artist: s.singername, dur: s.duration || 0 });
+      }
+    } catch { }
+  } catch { } finally { clearTimeout(tm); }
+  for (const c of out) c.score = titleScore(c.name, title) + (duration > 0 && c.dur > 0 ? candDurScore(c.dur, duration) : 0);
+  out.sort((a, b) => b.score - a.score);
+  return out.slice(0, 12);
+});
+
+ipcMain.handle('lyr-pick', async (_e, p) => {
+  try {
+    const { songKey, src, key } = p || {};
+    if (!songKey || !src || !key) return { ok: false };
+    const r = await fetchLyricByKey(src, key);
+    if (!r || !r.lines || !r.lines.length) return { ok: false };
+    lyrPicks[songKey.toLowerCase()] = { src, key };
+    savePicks();
+    lyrCache.set(songKey.toLowerCase(), { lines: r.lines, src: src + ' · 手动', dur: r.dur || 0, trans: r.trans || [] });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: (e && e.message) || String(e) };
+  }
+});
+
 ipcMain.handle('fetch-lyrics', (_e, q) => fetchLyrics(q || {}).catch(() => ({ lines: [], src: '' })));
 
 // 桌面歌词窗口

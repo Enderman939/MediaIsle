@@ -6,6 +6,10 @@
   const swAuto = document.getElementById('swAuto');
   const swFs = document.getElementById('swFs');
   const selStrategy = document.getElementById('selStrategy');
+  const selPos = document.getElementById('selPos');
+  const selSleep = document.getElementById('selSleep');
+  const sleepSub = document.getElementById('sleepSub');
+  const swTb = document.getElementById('swTb');
   const rngLyr = document.getElementById('rngLyr');
   const rngLyrVal = document.getElementById('rngLyrVal');
   const rngDl = document.getElementById('rngDl');
@@ -22,6 +26,7 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
   const chartTop = document.getElementById('chartTop');
   const dayLabels = document.getElementById('dayLabels');
   const trackRows = document.getElementById('trackRows');
+  const histList = document.getElementById('histList');
 
   const api = window.island;
   if (!api) return;
@@ -35,6 +40,7 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
       pages.forEach((pg) => pg.classList.toggle('active', pg.id === 'page-' + target));
       if (target === 'stats') refresh(); // 页面显示后重绘图表(隐藏时宽度为 0)
       if (target === 'logs') loadLogs();
+      if (target === 'mixer') loadMixer();
     });
   });
 
@@ -70,7 +76,9 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
     swBi.checked = cfg.bilingual !== false;
     swAuto.checked = !!cfg.autostart;
     swFs.checked = cfg.fsHide !== false;
-    [swGlass, swDlyr, swBi, swAuto, swFs].forEach(syncSwitch);
+    [swGlass, swDlyr, swBi, swAuto, swFs, swTb].forEach(syncSwitch);
+    selPos.value = cfg.islandPos === 'bottom' ? 'bottom' : 'top';
+    syncSelLabel(selPos);
     lyrSources = (Array.isArray(cfg.lyrSources) && cfg.lyrSources.length) ? cfg.lyrSources.slice() : ['soda', 'netease', 'qq', 'kugou'];
     renderChips();
     selStrategy.value = cfg.lyrStrategy === 'quality' ? 'quality' : 'race';
@@ -120,7 +128,9 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
   bindSwitch(swBi, 'bilingual');
   bindSwitch(swAuto, 'autostart');
   bindSwitch(swFs, 'fsHide');
+  bindSwitch(swTb, 'taskbar');
   bindSelect(selStrategy, 'lyrStrategy');
+  bindSelect(selPos, 'islandPos');
   bindRange(rngLyr, rngLyrVal, 'lyrSize', (v) => v.toFixed(1));
   bindRange(rngDl, rngDlVal, 'dlyrSize', (v) => v + ' px');
   bindRange(rngDlSub, rngDlSubVal, 'dlyrSubSize', (v) => v + ' px');
@@ -143,7 +153,195 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
     const cfg2 = await api.setCfg('lyrSources', lyrSources);
     applyCfg(cfg2);
   });
+    // ---------------------------------------------------------------- 定时停止
+  function fmtSleep(endAt) {
+    if (!endAt || endAt <= Date.now()) return '到时自动暂停播放';
+    const s = Math.max(0, Math.round((endAt - Date.now()) / 1000));
+    return '剩余 ' + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') + ' 后暂停播放';
+  }
+  async function refreshSleep() {
+    try {
+      const st = await api.sleepGet();
+      sleepSub.textContent = fmtSleep(st.endAt);
+    } catch { }
+  }
+  selSleep.addEventListener('change', async () => {
+    syncSelLabel(selSleep);
+    try { await api.sleepSet(Number(selSleep.value) || 0); } catch { }
+    refreshSleep();
+  });
+  setInterval(refreshSleep, 1000);
+  refreshSleep();
+
+  // ---------------------------------------------------------------- 音量混音器
+  const mixerList = document.getElementById('mixerList');
+  let mixerSig = '';
+  function renderMixer(list) {
+    const sig = JSON.stringify(list);
+    if (sig === mixerSig) return;
+    mixerSig = sig;
+    mixerList.innerHTML = '';
+    if (!list || !list.length) {
+      const d = document.createElement('div');
+      d.className = 'fl-empty';
+      d.textContent = '暂无活动的音频会话';
+      mixerList.appendChild(d);
+      return;
+    }
+    for (const s of list) {
+      const row = document.createElement('div');
+      row.className = 'md3-row';
+      const txt = document.createElement('div');
+      txt.className = 'md3-row__txt';
+      txt.innerHTML = '<div class="md3-row__headline"></div><div class="md3-row__support">PID ' + s.pid + '</div>';
+      txt.querySelector('.md3-row__headline').textContent = s.name || ('PID ' + s.pid);
+      const slider = document.createElement('div');
+      slider.className = 'md3-slider';
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = '0'; input.max = '100'; input.step = '1';
+      input.value = s.vol || 0;
+      const val = document.createElement('span');
+      val.className = 'md3-slider__val';
+      val.textContent = Math.round(s.vol || 0) + '%';
+      input.addEventListener('input', () => {
+        val.textContent = Math.round(input.value) + '%';
+        const p = ((input.value - input.min) / (input.max - input.min)) * 100;
+        input.style.setProperty('--p', p + '%');
+      });
+      let t = null;
+      input.addEventListener('input', () => {
+        clearTimeout(t);
+        t = setTimeout(() => { if (api.mixerSet) api.mixerSet(s.pid, Number(input.value)); }, 250);
+      });
+      slider.appendChild(input);
+      slider.appendChild(val);
+      row.appendChild(txt);
+      row.appendChild(slider);
+      mixerList.appendChild(row);
+    }
+  }
+  function loadMixer() {
+    if (!api.mixerGet) return;
+    api.mixerGet().then(renderMixer).catch(() => { });
+  }
+  if (api.onMixerList) api.onMixerList((list) => renderMixer(list));
+
   api.getCfg().then(applyCfg).catch(() => { });
+
+  // ---------------------------------------------------------------- 报告图 / 备份
+  let lastStats = null;
+  function collectFavs() {
+    const favs = {};
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('fav:')) favs[k] = localStorage.getItem(k);
+      }
+    } catch { }
+    return favs;
+  }
+  function applyFavs(favs) {
+    try {
+      const olds = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('fav:')) olds.push(k);
+      }
+      olds.forEach((k) => localStorage.removeItem(k));
+      for (const k of Object.keys(favs || {})) localStorage.setItem(k, favs[k]);
+    } catch { }
+  }
+  function flashBtn(btn, text) {
+    const old = btn.textContent;
+    btn.textContent = text;
+    setTimeout(() => { btn.textContent = old; }, 1600);
+  }
+  const btnReport = document.getElementById('btnReport');
+  const btnExport = document.getElementById('btnExport');
+  const btnImport = document.getElementById('btnImport');
+  if (btnReport) btnReport.addEventListener('click', () => { if (lastStats) genReport(lastStats); });
+  if (btnExport) btnExport.addEventListener('click', async () => {
+    if (!api.backupExport) return;
+    const r = await api.backupExport(collectFavs()).catch(() => null);
+    flashBtn(btnExport, r && r.ok ? '已导出 ✓' : '导出失败');
+  });
+  if (btnImport) btnImport.addEventListener('click', async () => {
+    if (!api.backupImport) return;
+    const r = await api.backupImport(collectFavs()).catch(() => null);
+    if (r && r.ok) {
+      applyFavs(r.favs);
+      if (r.config) applyCfg(r.config);
+      flashBtn(btnImport, '已导入 ✓');
+      refresh();
+    } else {
+      flashBtn(btnImport, (r && r.message) ? '失败' : '已取消');
+    }
+  });
+
+  // 报告图: canvas 绘制并下载 PNG
+  function genReport(st) {
+    const W = 1000, H = 1400;
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const g = cv.getContext('2d');
+    g.fillStyle = '#141218';
+    g.fillRect(0, 0, W, H);
+    g.fillStyle = '#d0bcff';
+    g.font = '700 52px "Segoe UI", "Microsoft YaHei UI", sans-serif';
+    g.fillText('MediaIsle 听歌报告', 64, 120);
+    g.fillStyle = 'rgba(202,196,208,.7)';
+    g.font = '24px "Segoe UI", sans-serif';
+    g.fillText('生成于 ' + new Date().toLocaleString('zh-CN', { hour12: false }), 64, 168);
+    let total = 0, days = 0;
+    for (const k of Object.keys(st.days || {})) { total += st.days[k] || 0; if ((st.days[k] || 0) > 60) days++; }
+    const fmtH = (sec) => (sec >= 3600 ? (sec / 3600).toFixed(1) + ' 小时' : Math.round(sec / 60) + ' 分钟');
+    g.fillStyle = '#e6e0e9';
+    g.font = '700 40px "Segoe UI", sans-serif';
+    g.fillText(total >= 60 ? fmtH(total) : '0 分钟', 64, 280);
+    g.fillStyle = 'rgba(202,196,208,.7)';
+    g.font = '22px "Segoe UI", sans-serif';
+    g.fillText('累计收听 · 活跃 ' + days + ' 天', 64, 322);
+    // Top5
+    const top = Object.values(st.tracks || {}).sort((a, b) => (b.sec || 0) - (a.sec || 0)).slice(0, 5);
+    const maxSec = top.length ? top[0].sec || 1 : 1;
+    g.fillStyle = '#cac4d0';
+    g.font = '500 26px "Segoe UI", sans-serif';
+    g.fillText('最常听 Top 5', 64, 420);
+    top.forEach((t, i) => {
+      const y = 490 + i * 110;
+      g.fillStyle = 'rgba(230,224,233,.06)';
+      g.fillRect(64, y - 38, W - 128, 88);
+      g.fillStyle = '#e6e0e9';
+      g.font = '600 24px "Segoe UI", sans-serif';
+      g.fillText((i + 1) + '. ' + (t.t || '(未知)'), 92, y);
+      g.fillStyle = 'rgba(202,196,208,.8)';
+      g.font = '19px "Segoe UI", sans-serif';
+      g.fillText((t.a || '') + ' · ' + fmtH(t.sec || 0), 92, y + 30);
+      g.fillStyle = '#d0bcff';
+      g.fillRect(64, y + 44, (W - 128 - 40) * Math.min(1, (t.sec || 0) / maxSec), 6);
+    });
+    // 最常听歌手
+    const byArtist = {};
+    for (const t of Object.values(st.tracks || {})) {
+      const a = (t.a || '').split('/')[0];
+      if (!a) continue;
+      byArtist[a] = (byArtist[a] || 0) + (t.sec || 0);
+    }
+    const artists = Object.entries(byArtist).sort((a, b) => b[1] - a[1]);
+    if (artists.length) {
+      g.fillStyle = '#cac4d0';
+      g.font = '500 26px "Segoe UI", sans-serif';
+      g.fillText('最常听歌手: ' + artists[0][0] + ' · ' + fmtH(artists[0][1]), 64, 1080);
+    }
+    g.fillStyle = 'rgba(202,196,208,.45)';
+    g.font = '20px "Segoe UI", sans-serif';
+    g.fillText('由 MediaIsle 生成 · 随心而动，乐在岛上', 64, H - 64);
+    const a = document.createElement('a');
+    a.download = 'MediaIsle-听歌报告-' + new Date().toISOString().slice(0, 10) + '.png';
+    a.href = cv.toDataURL('image/png');
+    a.click();
+  }
 
   // ---------------------------------------------------------------- 日志页
   let logsLoaded = false;
@@ -410,6 +608,7 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
   async function refresh() {
     try {
       const st = await api.getStats();
+      lastStats = st;
       let total = 0;
       for (const k of Object.keys(st.days || {})) total += st.days[k];
       sumTotal.textContent = total >= 60 ? ('累计收听 ' + fmtSec(total)) : '';
@@ -417,7 +616,38 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
       drawDays(st.days || {});
       drawTop(st.tracks || {});
       drawTable(st.tracks || {});
+      drawHistory(st.history || []);
     } catch { }
+  }
+  function drawHistory(history) {
+    if (!histList) return;
+    histList.innerHTML = '';
+    const list = (history || []).slice(-100).reverse();
+    if (!list.length) {
+      const d = document.createElement('div');
+      d.className = 'fl-empty';
+      d.textContent = '暂无播放记录';
+      histList.appendChild(d);
+      return;
+    }
+    for (const h of list) {
+      const row = document.createElement('div');
+      row.className = 'hist-row';
+      const d0 = new Date(h.t);
+      const time = String(d0.getMonth() + 1).padStart(2, '0') + '-' + String(d0.getDate()).padStart(2, '0') + ' '
+        + String(d0.getHours()).padStart(2, '0') + ':' + String(d0.getMinutes()).padStart(2, '0');
+      const t = document.createElement('span');
+      t.className = 'ht';
+      t.textContent = time;
+      const n = document.createElement('span');
+      n.className = 'hn';
+      n.textContent = h.title || '(未知)';
+      const a = document.createElement('span');
+      a.className = 'ha';
+      a.textContent = h.artist || '';
+      row.appendChild(t); row.appendChild(n); row.appendChild(a);
+      histList.appendChild(row);
+    }
   }
   api.onStatsUpdated(refresh);
   refresh();

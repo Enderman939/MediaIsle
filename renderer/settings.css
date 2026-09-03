@@ -507,6 +507,46 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* 操作按钮行 + 播放历史 */
+.md3-actions {
+  display: flex;
+  gap: 8px;
+  padding: 4px 4px 0;
+}
+.md3-hist { max-height: 300px; overflow-y: auto; }
+.hist-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--md-sys-shape-corner-small);
+}
+.hist-row:hover { background: color-mix(in srgb, var(--md-sys-color-on-surface) 4%, transparent); }
+.hist-row .ht {
+  flex: none;
+  font: var(--ts-label-medium);
+  color: var(--md-sys-color-outline);
+  font-variant-numeric: tabular-nums;
+}
+.hist-row .hn {
+  flex: 1;
+  min-width: 0;
+  font: var(--ts-body-medium);
+  color: var(--md-sys-color-on-surface);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hist-row .ha {
+  flex: none;
+  max-width: 35%;
+  font: var(--ts-body-small);
+  color: var(--md-sys-color-on-surface-variant);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Filter Chips (MD3) */
 .md3-chips {
   flex: none;

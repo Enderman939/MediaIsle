@@ -48,4 +48,17 @@ contextBridge.exposeInMainWorld('island', {
   logGet: () => ipcRenderer.invoke('log-get'),
   logClear: () => ipcRenderer.send('log-clear'),
   onLogAppended: (cb) => ipcRenderer.on('log-appended', (_e, v) => cb(v)),
+  // 备份导入/导出 (favs 由渲染层收集/落盘)
+  backupExport: (favs) => ipcRenderer.invoke('backup-export', favs),
+  backupImport: (favs) => ipcRenderer.invoke('backup-import', favs),
+  // 定时停止
+  sleepGet: () => ipcRenderer.invoke('sleep-get'),
+  sleepSet: (minutes) => ipcRenderer.invoke('sleep-set', minutes),
+  // 歌词纠错
+  lyrCandidates: (q) => ipcRenderer.invoke('lyr-candidates', q),
+  lyrPick: (p) => ipcRenderer.invoke('lyr-pick', p),
+  // 音量混音器
+  mixerGet: () => ipcRenderer.invoke('mixer-get'),
+  mixerSet: (pid, vol) => ipcRenderer.send('mixer-set', pid, vol),
+  onMixerList: (cb) => ipcRenderer.on('mixer-list', (_e, v) => cb(v)),
 });
