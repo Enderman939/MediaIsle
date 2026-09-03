@@ -8,6 +8,8 @@
   const selStrategy = document.getElementById('selStrategy');
   const rngLyr = document.getElementById('rngLyr');
   const rngLyrVal = document.getElementById('rngLyrVal');
+  const rngSub = document.getElementById('rngSub');
+  const rngSubVal = document.getElementById('rngSubVal');
   const rngDl = document.getElementById('rngDl');
   const rngDlVal = document.getElementById('rngDlVal');
   const lyrChips = document.getElementById('lyrChips');
@@ -74,6 +76,7 @@
     selStrategy.value = cfg.lyrStrategy === 'quality' ? 'quality' : 'race';
     syncSelLabel(selStrategy);
     setRange(rngLyr, rngLyrVal, cfg.lyrSize || 12.5, (v) => v.toFixed(1));
+    setRange(rngSub, rngSubVal, cfg.lyrSubSize || 10.5, (v) => v.toFixed(1));
     setRange(rngDl, rngDlVal, cfg.dlyrSize || 32, (v) => v + ' px');
     if (cfg.version) document.getElementById('appVer').textContent = cfg.version;
   }
@@ -119,6 +122,7 @@
   bindSwitch(swFs, 'fsHide');
   bindSelect(selStrategy, 'lyrStrategy');
   bindRange(rngLyr, rngLyrVal, 'lyrSize', (v) => v.toFixed(1));
+  bindRange(rngSub, rngSubVal, 'lyrSubSize', (v) => v.toFixed(1));
   bindRange(rngDl, rngDlVal, 'dlyrSize', (v) => v + ' px');
 
   // ---------------------------------------------------------------- 音源多选

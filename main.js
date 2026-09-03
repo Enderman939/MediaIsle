@@ -89,7 +89,7 @@ ipcMain.on('log-clear', () => { logBuf.length = 0; });
 
 // 配置持久化(毛玻璃/桌面歌词)
 const CFG_FILE = path.join(app.getPath('userData'), 'config.json');
-let cfg = { glass: false, dlyr: false, fsHide: true, bilingual: true, lyrSize: 12.5, dlyrSize: 32, lyrSources: ['soda', 'netease', 'qq', 'kugou'], lyrStrategy: 'race' };
+let cfg = { glass: false, dlyr: false, fsHide: true, bilingual: true, lyrSize: 12.5, lyrSubSize: 10.5, dlyrSize: 32, lyrSources: ['soda', 'netease', 'qq', 'kugou'], lyrStrategy: 'race' };
 try {
   const raw = fs.readFileSync(CFG_FILE, 'utf8').replace(/^\uFEFF/, '');
   Object.assign(cfg, JSON.parse(raw));
@@ -252,7 +252,7 @@ function createWindow() {
     keepOnTop();
     send('glass-changed', !!cfg.glass);
     send('bilingual-changed', cfg.bilingual !== false);
-    send('lyr-size-changed', cfg.lyrSize || 12.5);
+    send('lyr-size-changed', { size: cfg.lyrSize || 12.5, subSize: cfg.lyrSubSize || 10.5 });
   });
 
   // 调试: 转发渲染层 console 输出 (error/warning 级别同时写入 error.log)
@@ -714,6 +714,7 @@ ipcMain.handle('cfg-get', () => ({
   fsHide: cfg.fsHide !== false,
   bilingual: cfg.bilingual !== false,
   lyrSize: cfg.lyrSize || 12.5,
+  lyrSubSize: cfg.lyrSubSize || 10.5,
   dlyrSize: cfg.dlyrSize || 32,
   version: app.getVersion(),
 }));
@@ -754,7 +755,14 @@ ipcMain.handle('cfg-set', (_e, key, val) => {
     if (isFinite(n) && n >= 10 && n <= 18) {
       cfg.lyrSize = n;
       saveCfg();
-      send('lyr-size-changed', cfg.lyrSize);
+      send('lyr-size-changed', { size: cfg.lyrSize, subSize: cfg.lyrSubSize || 10.5 });
+    }
+  } else if (key === 'lyrSubSize') {
+    const n = Number(val);
+    if (isFinite(n) && n >= 8 && n <= 16) {
+      cfg.lyrSubSize = n;
+      saveCfg();
+      send('lyr-size-changed', { size: cfg.lyrSize || 12.5, subSize: cfg.lyrSubSize });
     }
   } else if (key === 'dlyrSize') {
     const n = Number(val);
@@ -783,6 +791,7 @@ ipcMain.handle('cfg-set', (_e, key, val) => {
     fsHide: cfg.fsHide !== false,
     bilingual: cfg.bilingual !== false,
     lyrSize: cfg.lyrSize || 12.5,
+    lyrSubSize: cfg.lyrSubSize || 10.5,
     dlyrSize: cfg.dlyrSize || 32,
     version: app.getVersion(),
   };
