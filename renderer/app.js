@@ -39,7 +39,7 @@
     volume: 50, mute: false,
     sources: [], selApp: '',
     lyrics: null, lyricKey: '',
-    trans: [], bilingual: true, lyrSize: 12.5, lyrSubSize: 10.5,
+    trans: [], bilingual: true, lyrSize: 12.5,
     art: null,
     updatedAt: 0,
     seekGraceUntil: 0,   // seek 后的桥接帧宽限期(防视觉回跳)
@@ -507,10 +507,10 @@
   // 行高: 双语模式下带翻译的行更高
   const rowH = (i) => (S.bilingual && lineTrans[i]) ? LYR_LINE_H + LYR_SUB_H : LYR_LINE_H;
 
-  // 字号应用: CSS 变量 + 行高度量同步 (滚动定位依赖行高); 原文与译文各自独立字号
+  // 字号应用: CSS 变量 + 行高度量同步 (滚动定位依赖行高); 译文按原文等比
   function applyLyrSize() {
     const s = S.lyrSize || 12.5;
-    const sub = S.lyrSubSize || 10.5;
+    const sub = Math.round((s - 2) * 2) / 2;
     LYR_LINE_H = Math.ceil(s * 1.52);
     LYR_SUB_H = Math.round(sub * 1.43);
     island.style.setProperty('--lyr-size', s + 'px');
@@ -799,9 +799,7 @@
     lastDomIdx = -999;
   });
   api.onLyrSize((v) => {
-    v = v || {};
-    S.lyrSize = Number(v.size) || 12.5;
-    S.lyrSubSize = Number(v.subSize) || 10.5;
+    S.lyrSize = Number(v) || 12.5;
     applyLyrSize();
     lyricsBuiltKey = '';
     lyrWinStart = -1;
