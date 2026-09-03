@@ -63,7 +63,6 @@
     });
   }
   function applyCfg(cfg) {
-    console.log('[applyCfg] 收到:', JSON.stringify({ lyrSize: cfg.lyrSize, dlyrSize: cfg.dlyrSize, strategy: cfg.lyrStrategy, sources: cfg.lyrSources, bilingual: cfg.bilingual, version: cfg.version }));
     swGlass.checked = !!cfg.glass;
     swDlyr.checked = !!cfg.dlyr;
     swBi.checked = cfg.bilingual !== false;

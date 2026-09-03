@@ -96,7 +96,6 @@ try {
 } catch (e) {
   console.error('[cfg] 配置加载失败, 使用默认值:', (e && e.message) || e);
 }
-console.log('[cfg] 启动配置:', JSON.stringify({ lyrSize: cfg.lyrSize, dlyrSize: cfg.dlyrSize, lyrStrategy: cfg.lyrStrategy, lyrSources: cfg.lyrSources, bilingual: cfg.bilingual }));
 let cfgTimer = null;
 function saveCfg() {
   clearTimeout(cfgTimer);
@@ -720,7 +719,6 @@ ipcMain.handle('cfg-get', () => ({
 }));
 
 ipcMain.handle('cfg-set', (_e, key, val) => {
-  console.log('[cfg-set]', key, '=', typeof val === 'object' ? JSON.stringify(val) : String(val));
   if (key === 'glass') {
     cfg.glass = !!val;
     saveCfg();
@@ -776,7 +774,7 @@ ipcMain.handle('cfg-set', (_e, key, val) => {
       if (!hiddenByUser && win && !win.isDestroyed()) win.showInactive();
     }
   }
-  const ret = {
+  return {
     glass: !!cfg.glass,
     dlyr: !!cfg.dlyr,
     autostart: app.getLoginItemSettings().openAtLogin,
@@ -788,8 +786,6 @@ ipcMain.handle('cfg-set', (_e, key, val) => {
     dlyrSize: cfg.dlyrSize || 32,
     version: app.getVersion(),
   };
-  console.log('[cfg-set] 返回:', JSON.stringify({ lyrSize: ret.lyrSize, dlyrSize: ret.dlyrSize, strategy: ret.lyrStrategy, sources: ret.lyrSources, bilingual: ret.bilingual }));
-  return ret;
 });
 
 ipcMain.handle('stats-get', () => JSON.parse(JSON.stringify(stats)));
