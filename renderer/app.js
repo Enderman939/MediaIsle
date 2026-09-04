@@ -735,6 +735,7 @@
   // ---------------------------------------------------------------- 悬停
   // 悬停检测由主进程光标轮询完成, 这里只响应结果
   api.onHover((inside) => {
+    if (lyrPickOpen || favOpen) return; // 面板打开时完全忽略悬停变化
     hovered = inside;
     if (inside) {
       setState(expandState());
@@ -779,15 +780,18 @@
       flList.appendChild(row);
     }
   }
+  let favOpen = false;
   function openFav() {
     buildFav();
     // 同纠错面板: 钉住悬停防塌缩
+    favOpen = true;
     api.setDragging(true);
     setState('favlist');
   }
   eSource.addEventListener('click', (e) => { e.stopPropagation(); openFav(); });
   flBack.addEventListener('click', (e) => {
     e.stopPropagation();
+    favOpen = false;
     api.setDragging(false);
     setState(hovered ? expandState() : autoState());
   });

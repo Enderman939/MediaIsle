@@ -1,6 +1,6 @@
 {
   "name": "mediaisle",
-  "version": "1.0.4+20260904.1857",
+  "version": "1.0.4+20260904.1912",
   "description": "MediaIsle - Dynamic Island style media controller for Windows",
   "productName": "MediaIsle",
   "main": "main.js",
@@ -44,6 +44,7 @@
     "electron-builder": "^26.15.3"
   },
   "dependencies": {
-    "lmdb": "^3.5.6"
+    "lmdb": "^3.5.6",
+    "ws": "^8.21.3"
   }
 }
