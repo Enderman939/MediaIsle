@@ -150,10 +150,6 @@ namespace FastMusicIsland {
       return r.L <= mi.rcMonitor.L && r.T <= mi.rcMonitor.T && r.R >= mi.rcMonitor.R && r.B >= mi.rcMonitor.B;
     }
   }
-
-
-    }
-  }
 }
 '@
     $script:audioOk = $true
