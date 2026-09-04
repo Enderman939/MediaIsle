@@ -152,124 +152,6 @@ namespace FastMusicIsland {
   }
 
 
-  // ---- 音量混音器: 会话枚举 + 每应用音量 ----
-  [Guid("F4B1A599-7D96-4B0D-AFFD-5AF2B2C4E5C1"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-  internal interface IAudioSessionControl {
-    int GetState(out int state);
-    int GetDisplayName([MarshalAs(UnmanagedType.LPWStr)] out string name);
-    int SetDisplayName([MarshalAs(UnmanagedType.LPWStr)] string name, IntPtr ctx);
-    int GetIconPath([MarshalAs(UnmanagedType.LPWStr)] out string path);
-    int SetIconPath([MarshalAs(UnmanagedType.LPWStr)] string path, IntPtr ctx);
-    int GetGroupingParam(out Guid guid);
-    int SetGroupingParam(ref Guid guid, IntPtr ctx);
-    int RegisterAudioSessionNotification(IntPtr notifications);
-    int UnregisterAudioSessionNotification(IntPtr notifications);
-  }
-
-  [Guid("bfb7ff88-7239-4fc9-8fa2-07c950bec9c2"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-  internal interface IAudioSessionControl2 {
-    int GetState(out int state);
-    int GetDisplayName([MarshalAs(UnmanagedType.LPWStr)] out string name);
-    int SetDisplayName([MarshalAs(UnmanagedType.LPWStr)] string name, IntPtr ctx);
-    int GetIconPath([MarshalAs(UnmanagedType.LPWStr)] out string path);
-    int SetIconPath([MarshalAs(UnmanagedType.LPWStr)] string path, IntPtr ctx);
-    int GetGroupingParam(out Guid guid);
-    int SetGroupingParam(ref Guid guid, IntPtr ctx);
-    int RegisterAudioSessionNotification(IntPtr notifications);
-    int UnregisterAudioSessionNotification(IntPtr notifications);
-    int GetProcessId(out uint pid);
-    [PreserveSig] int IsSystemSoundsSession();
-    int SetDuckingPreference([MarshalAs(UnmanagedType.Bool)] bool opt);
-  }
-
-  [Guid("87CE5C03-4B58-46AF-8E37-DFD16A1B028A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-  internal interface ISimpleAudioVolume {
-    int SetMasterVolume(float level, IntPtr ctx);
-    int GetMasterVolume(out float level);
-    int SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, IntPtr ctx);
-    int GetMute([MarshalAs(UnmanagedType.Bool)] out bool mute);
-  }
-
-  [Guid("E2F5BB11-0570-40C4-82C9-9EA4C8C38D47"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-  internal interface IAudioSessionEnumerator {
-    int GetCount(out int count);
-    int GetSession(int index, out IAudioSessionControl session);
-  }
-
-  [Guid("FA4666CD-9C24-48DE-93BA-4B9EE0F3EEE0"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-  internal interface IAudioSessionManager {
-    int GetAudioSessionControl(IntPtr guid, uint flags, out IAudioSessionControl ctl);
-    int GetSimpleAudioVolume(IntPtr guid, uint flags, out ISimpleAudioVolume vol);
-  }
-
-  [Guid("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-  internal interface IAudioSessionManager2 {
-    int GetAudioSessionControl(IntPtr guid, uint flags, out IAudioSessionControl ctl);
-    int GetSimpleAudioVolume(IntPtr guid, uint flags, out ISimpleAudioVolume vol);
-    int GetSessionEnumerator(out IAudioSessionEnumerator enumr);
-    int RegisterSessionNotification(IntPtr notifications);
-    int UnregisterSessionNotification(IntPtr notifications);
-  }
-
-  public static class Mixer {
-    private static IAudioSessionManager2 mgr;
-    private static IAudioSessionManager2 M() {
-      if (mgr == null) {
-        var en = (IMMDeviceEnumerator)(object)new MMDeviceEnumeratorCom();
-        IMMDevice dev;
-        Marshal.ThrowExceptionForHR(en.GetDefaultAudioEndpoint(0, 1, out dev));
-        var iid = new Guid("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F");
-        object o;
-        Marshal.ThrowExceptionForHR(dev.Activate(ref iid, 0x17, IntPtr.Zero, out o));
-        mgr = (IAudioSessionManager2)o;
-      }
-      return mgr;
-    }
-    public static object[] GetSessions() {
-      var m = M();
-      IAudioSessionEnumerator enumr;
-      Marshal.ThrowExceptionForHR(m.GetSessionEnumerator(out enumr));
-      int count;
-      Marshal.ThrowExceptionForHR(enumr.GetCount(out count));
-      var seen = new System.Collections.Generic.HashSet<uint>();
-      var list = new System.Collections.Generic.List<object>();
-      for (int i = 0; i < count; i++) {
-        IAudioSessionControl ctl;
-        Marshal.ThrowExceptionForHR(enumr.GetSession(i, out ctl));
-        var c2 = ctl as IAudioSessionControl2;
-        var sv = ctl as ISimpleAudioVolume;
-        if (c2 == null || sv == null) continue;
-        uint pid;
-        c2.GetProcessId(out pid);
-        if (pid == 0 || seen.Contains(pid)) continue;
-        seen.Add(pid);
-        float vol;
-        Marshal.ThrowExceptionForHR(sv.GetMasterVolume(out vol));
-        bool mute;
-        Marshal.ThrowExceptionForHR(sv.GetMute(out mute));
-        string name = "";
-        try { name = System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; } catch { }
-        list.Add(new { pid = pid, name = name, vol = Math.Round(vol * 100.0, 1), mute = mute });
-      }
-      return list.ToArray();
-    }
-    public static void SetVolume(uint pid, float vol) {
-      var m = M();
-      IAudioSessionEnumerator enumr;
-      Marshal.ThrowExceptionForHR(m.GetSessionEnumerator(out enumr));
-      int count;
-      Marshal.ThrowExceptionForHR(enumr.GetCount(out count));
-      for (int i = 0; i < count; i++) {
-        IAudioSessionControl ctl;
-        Marshal.ThrowExceptionForHR(enumr.GetSession(i, out ctl));
-        var c2 = ctl as IAudioSessionControl2;
-        if (c2 == null) continue;
-        uint p;
-        c2.GetProcessId(out p);
-        if (p != pid) continue;
-        var sv = ctl as ISimpleAudioVolume;
-        if (sv != null) Marshal.ThrowExceptionForHR(sv.SetMasterVolume(vol / 100.0f, IntPtr.Zero));
-      }
     }
   }
 }
@@ -571,13 +453,7 @@ function Invoke-Command($cmdObj) {
                 [FastMusicIsland.Audio]::SetVolume($pct)
             } catch { Emit @{ type = 'error'; message = "设置音量失败: $($_.Exception.Message)" } }
         }
-        'mixer-list' {
-      try { Emit @{ type = 'mixer'; list = @([FastMusicIsland.Mixer]::GetSessions()) } } catch { Emit @{ type = 'mixer'; list = @() } }
-    }
-    'mixer-set' {
-      try { [FastMusicIsland.Mixer]::SetVolume([uint32]$cmdObj.pid, [float]$cmdObj.position) } catch { }
-    }
-    'toggle-mute' {
+        'toggle-mute' {
             if (-not $script:audioOk) { return }
             try { [FastMusicIsland.Audio]::SetMute(-not [FastMusicIsland.Audio]::GetMute()) }
             catch { Emit @{ type = 'error'; message = "切换静音失败: $($_.Exception.Message)" } }

@@ -40,7 +40,6 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
       pages.forEach((pg) => pg.classList.toggle('active', pg.id === 'page-' + target));
       if (target === 'stats') refresh(); // 页面显示后重绘图表(隐藏时宽度为 0)
       if (target === 'logs') loadLogs();
-      if (target === 'mixer') loadMixer();
     });
   });
 
@@ -172,62 +171,6 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
   });
   setInterval(refreshSleep, 1000);
   refreshSleep();
-
-  // ---------------------------------------------------------------- 音量混音器
-  const mixerList = document.getElementById('mixerList');
-  let mixerSig = '';
-  function renderMixer(list) {
-    const sig = JSON.stringify(list);
-    if (sig === mixerSig) return;
-    mixerSig = sig;
-    mixerList.innerHTML = '';
-    if (!list || !list.length) {
-      const d = document.createElement('div');
-      d.className = 'fl-empty';
-      d.textContent = '暂无活动的音频会话';
-      mixerList.appendChild(d);
-      return;
-    }
-    for (const s of list) {
-      const row = document.createElement('div');
-      row.className = 'md3-row';
-      const txt = document.createElement('div');
-      txt.className = 'md3-row__txt';
-      txt.innerHTML = '<div class="md3-row__headline"></div><div class="md3-row__support">PID ' + s.pid + '</div>';
-      txt.querySelector('.md3-row__headline').textContent = s.name || ('PID ' + s.pid);
-      const slider = document.createElement('div');
-      slider.className = 'md3-slider';
-      const input = document.createElement('input');
-      input.type = 'range';
-      input.min = '0'; input.max = '100'; input.step = '1';
-      input.value = s.vol || 0;
-      const val = document.createElement('span');
-      val.className = 'md3-slider__val';
-      val.textContent = Math.round(s.vol || 0) + '%';
-      input.addEventListener('input', () => {
-        val.textContent = Math.round(input.value) + '%';
-        const p = ((input.value - input.min) / (input.max - input.min)) * 100;
-        input.style.setProperty('--p', p + '%');
-      });
-      let t = null;
-      input.addEventListener('input', () => {
-        clearTimeout(t);
-        t = setTimeout(() => { if (api.mixerSet) api.mixerSet(s.pid, Number(input.value)); }, 250);
-      });
-      slider.appendChild(input);
-      slider.appendChild(val);
-      row.appendChild(txt);
-      row.appendChild(slider);
-      mixerList.appendChild(row);
-    }
-  }
-  function loadMixer() {
-    if (!api.mixerGet) return;
-    api.mixerGet().then(renderMixer).catch(() => { });
-  }
-  if (api.onMixerList) api.onMixerList((list) => renderMixer(list));
-
-  api.getCfg().then(applyCfg).catch(() => { });
 
   // ---------------------------------------------------------------- 报告图 / 备份
   let lastStats = null;

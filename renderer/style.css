@@ -494,17 +494,6 @@ body.glass .e-lyrics::after  { background: linear-gradient(rgba(24,24,30,0), rgb
 }
 .yl-line.on .yl-sub { color: rgba(255, 255, 255, .52); }
 
-/* 逐字卡拉OK: 词级染色 (仅活动行生效) */
-.yl-line .k-w { color: rgba(255, 255, 255, .34); }
-.yl-line.on .k-w.done { color: #fff; }
-.yl-line.on .k-w.cur {
-  background: linear-gradient(90deg, #fff var(--p, 0%), rgba(255, 255, 255, .34) var(--p, 0%));
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-}
-
 /* ---------------------------------------------------------------- 底部行(音源chips + 统计) */
 .e-foot {
   display: flex;

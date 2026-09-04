@@ -342,9 +342,6 @@ function handleBridgeLine(msg) {
     if (msg.status && msg.status !== lastBridgeStatus) { lastBridgeStatus = msg.status; updateThumbar(); }
   } else if (msg.type === 'volume') {
     send('volume-changed', msg);
-  } else if (msg.type === 'mixer') {
-    mixerCache = Array.isArray(msg.list) ? msg.list : [];
-    if (setWin && !setWin.isDestroyed()) setWin.webContents.send('mixer-list', mixerCache);
   } else if (msg.type === 'fs') {
     // 全屏应用前台时隐藏岛体, 退出全屏恢复 (可在设置中关闭)
     if (msg.v && cfg.fsHide && win && win.isVisible() && !hoverInside) {
@@ -679,16 +676,6 @@ async function applyUpdate() {
     return false;
   }
 }
-
-// ---------------------------------------------------------------- 音量混音器
-let mixerCache = [];
-ipcMain.handle('mixer-get', () => {
-  sendCommand('mixer-list');
-  return mixerCache;
-});
-ipcMain.on('mixer-set', (_e, pid, vol) => {
-  sendCommand('mixer-set', Number(vol) || 0, { pid: Number(pid) || 0 });
-});
 
 // ---------------------------------------------------------------- 任务栏播放控制按钮
 let thumbarIcons = null;
@@ -1284,18 +1271,8 @@ function parseSodaContent(text) {
   for (const ln of String(text || '').split(/\r?\n/)) {
     const m = /^\[(\d+),(\d+)\](.*)$/.exec(ln.trim());
     if (m) {
-      const lineStart = parseInt(m[1], 10);
-      const body = m[3];
-      // 逐字时间轴: <rel,dur,0>词
-      const words = [];
-      const wm = /<(\d+),(\d+),\d+>([^<]*)/g;
-      let w;
-      while ((w = wm.exec(body))) {
-        const wx = w[3];
-        if (wx) words.push({ t: (lineStart + parseInt(w[1], 10)) / 1000, d: parseInt(w[2], 10) / 1000, x: wx });
-      }
-      const x = (words.length ? words.map((v) => v.x).join('') : body.replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim();
-      if (x) out.push({ t: lineStart / 1000, x, w: words.length ? words : undefined });
+      const x = m[3].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+      if (x) out.push({ t: parseInt(m[1], 10) / 1000, x });
     } else {
       lrcRest.push(ln);
     }
@@ -1346,17 +1323,8 @@ function parseKrc(b64) {
     if (!line.startsWith('[')) continue;
     const m = /^\[(\d+),(\d+)\](.*)$/.exec(line);
     if (m) {
-      const lineStart = parseInt(m[1], 10);
-      const body = m[3];
-      const words = [];
-      const wm = /<(\d+),(\d+),\d+>([^<]*)/g;
-      let w;
-      while ((w = wm.exec(body))) {
-        const wx = w[3];
-        if (wx) words.push({ t: (lineStart + parseInt(w[1], 10)) / 1000, d: parseInt(w[2], 10) / 1000, x: wx });
-      }
-      const x = (words.length ? words.map((v) => v.x).join('') : body.replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim();
-      entries.push({ t: lineStart / 1000, x, w: words.length ? words : undefined });
+      const x = m[3].replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+      entries.push({ t: parseInt(m[1], 10) / 1000, x });
       continue;
     }
     const tg = /^\[(\w+):([^\]]*)\]$/.exec(line);
@@ -1527,7 +1495,7 @@ async function fetchLyricByKey(src, key) {
     if (!hit) return null;
     const entries = parseSodaContent(hit.c);
     if (!entries.length) return null;
-    const lines = entries.map(({ t, x, w }) => (w ? { t, x, w } : { t, x }));
+    const lines = entries.map(({ t, x }) => ({ t, x }));
     return { lines, trans: hit.t ? parseLrc(hit.t) : [], dur: hit.dur || 0 };
   }
   if (src === 'netease') {
@@ -1552,7 +1520,7 @@ async function fetchLyricByKey(src, key) {
     const kr = await httpJson(`https://lyrics.kugou.com/download?ver=1&client=pc&id=${cand.id}&accesskey=${aKey}&fmt=krc&charset=utf8`, H_UA);
     if (kr && kr.content) {
       const parsed = parseKrc(kr.content);
-      const lines = parsed ? parsed.entries.map(({ t, x, w }) => (w ? { t, x, w } : { t, x })) : [];
+      const lines = parsed ? parsed.entries.map(({ t, x }) => ({ t, x })) : [];
       if (lines.length) return { lines, trans: parsed.trans, dur: 0 };
     }
     return null;

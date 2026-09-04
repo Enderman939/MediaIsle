@@ -57,8 +57,4 @@ contextBridge.exposeInMainWorld('island', {
   // 歌词纠错
   lyrCandidates: (q) => ipcRenderer.invoke('lyr-candidates', q),
   lyrPick: (p) => ipcRenderer.invoke('lyr-pick', p),
-  // 音量混音器
-  mixerGet: () => ipcRenderer.invoke('mixer-get'),
-  mixerSet: (pid, vol) => ipcRenderer.send('mixer-set', pid, vol),
-  onMixerList: (cb) => ipcRenderer.on('mixer-list', (_e, v) => cb(v)),
 });

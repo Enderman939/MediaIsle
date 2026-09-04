@@ -500,24 +500,6 @@
     requestAnimationFrame(tick);
   }
 
-  // 逐字卡拉OK: 按播放进度设置当前行内每个词的染色状态 (无状态重算, 天然支持回退)
-  function karaokeTick(el, pos) {
-    for (const sp of el._ks) {
-      const end = sp._kt + sp._kd;
-      if (pos >= end) {
-        if (!sp._done) { sp.classList.remove('cur'); sp.classList.add('done'); sp._done = true; sp.style.removeProperty('--p'); }
-      } else if (pos >= sp._kt) {
-        if (sp._done) { sp.classList.remove('done'); sp._done = false; }
-        if (!sp.classList.contains('cur')) sp.classList.add('cur');
-        sp.style.setProperty('--p', Math.min(100, ((pos - sp._kt) / sp._kd) * 100).toFixed(1) + '%');
-        return;
-      } else {
-        if (sp.classList.contains('cur') || sp.classList.contains('done')) { sp.classList.remove('cur', 'done'); sp._done = false; sp.style.removeProperty('--p'); }
-        return;
-      }
-    }
-  }
-
   // 多行滚动歌词: 虚拟窗口渲染(仅当前行±7), 仅换行时触碰 DOM, 点击句子跳转
   let LYR_LINE_H = 19;
   let LYR_SUB_H = 15;
@@ -580,23 +562,7 @@
     for (let i = start; i <= end; i++) {
       const d = document.createElement('div');
       d.className = 'yl-line';
-      const words = lines[i].w;
-      if (words && words.length) {
-        // 逐字歌词: 每词一个 span, 活动行做卡拉OK渐染
-        const spans = [];
-        for (const wd of words) {
-          const sp = document.createElement('span');
-          sp.className = 'k-w';
-          sp.textContent = wd.x;
-          sp._kt = wd.t;
-          sp._kd = wd.d;
-          d.appendChild(sp);
-          spans.push(sp);
-        }
-        d._ks = spans;
-      } else {
-        d.textContent = lines[i].x;
-      }
+      d.textContent = lines[i].x;
       if (S.bilingual && lineTrans[i]) {
         d.classList.add('has-sub');
         const sub = document.createElement('div');
@@ -673,9 +639,6 @@
     // DOM 更新仅在展开面板可见时进行
     if (curState() === 'expanded' || curState() === 'favlist') {
       ensureLyrWindow(lines, idx);
-      // 逐字卡拉OK: 当前行词级渐染 (无逐字数据的行自动跳过)
-      const rowEl = lyrEls[idx - lyrWinStart];
-      if (rowEl && rowEl._ks) karaokeTick(rowEl, pos);
       if (idx !== lastDomIdx) {
         // 平移量按实测累计行高计算(长句换行/双语副行更高), 当前行垂直居中;
         // 合成层文字模糊对策: 平移对齐物理像素网格 (高 DPI 缩放下小数偏移会被插值拉糊)
