@@ -781,11 +781,14 @@
   }
   function openFav() {
     buildFav();
+    // 同纠错面板: 钉住悬停防塌缩
+    api.setDragging(true);
     setState('favlist');
   }
   eSource.addEventListener('click', (e) => { e.stopPropagation(); openFav(); });
   flBack.addEventListener('click', (e) => {
     e.stopPropagation();
+    api.setDragging(false);
     setState(hovered ? expandState() : autoState());
   });
 
@@ -795,6 +798,8 @@
   function openLyrPick() {
     if (!S.hasSession || !S.title) return;
     lyrPickOpen = true;
+    // 面板比展开态窄: 钉住悬停, 防止鼠标落在新矩形外触发塌缩
+    api.setDragging(true);
     lpList.innerHTML = '';
     lpCount.textContent = '';
     const load = document.createElement('div');
@@ -832,6 +837,7 @@
           const r = await api.lyrPick({ songKey: (S.title + '|' + S.artist), src: c.src, key: c.key });
           if (r && r.ok) {
             lyrPickOpen = false;
+            api.setDragging(false);
             api.getLyrics({ title: S.title, artist: S.artist, duration: S.duration }).then((lr) => {
               S.lyrics = (lr && lr.lines) || [];
               S.trans = (lr && lr.trans) || [];
@@ -847,7 +853,7 @@
       }
     }).catch(() => { });
   }
-  lpBack.addEventListener('click', (e) => { e.stopPropagation(); lyrPickOpen = false; setState(hovered ? expandState() : autoState()); });
+  lpBack.addEventListener('click', (e) => { e.stopPropagation(); lyrPickOpen = false; api.setDragging(false); setState(hovered ? expandState() : autoState()); });
   const btnLyrFix = $('btnLyrFix');
   btnLyrFix.addEventListener('click', (e) => { e.stopPropagation(); openLyrPick(); });
   eLyrics.addEventListener('contextmenu', (e) => { e.preventDefault(); openLyrPick(); });
