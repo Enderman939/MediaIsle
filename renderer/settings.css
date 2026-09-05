@@ -71,8 +71,15 @@
 html, body {
   width: 100%;
   height: 100%;
-  background: var(--md-sys-color-surface);
+  background: #141218;
   overflow: hidden;
+}
+
+/* 窗口进入动画 */
+.md3-app { animation: appIn var(--md-sys-motion-duration-medium2) var(--md-sys-motion-easing-emphasized-decelerate); }
+@keyframes appIn {
+  from { opacity: 0; transform: scale(.985); }
+  to { opacity: 1; transform: none; }
 }
 
 body {
@@ -210,7 +217,12 @@ body {
   background: color-mix(in srgb, var(--md-sys-color-on-secondary-container) 8%, var(--md-sys-color-secondary-container));
 }
 
-/* ------------------------------------------------ 内容区 */
+/* ------------------------------------------------ 内容区 (页面切换: 方向感知滑动) */
+.md3-page.active { animation: pageFwd var(--md-sys-motion-duration-medium2) var(--md-sys-motion-easing-emphasized); }
+.md3-content[data-dir="back"] .md3-page.active { animation-name: pageBack; }
+@keyframes pageFwd { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+@keyframes pageBack { from { opacity: 0; transform: translateX(-24px); } to { opacity: 1; transform: none; } }
+
 .md3-content {
   flex: 1;
   min-width: 0;
@@ -578,6 +590,7 @@ body {
     color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
 }
 .md3-chip:hover { background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent); }
+.md3-chip:active { transform: scale(.95); } /* chipPress */
 .md3-chip.on {
   background: var(--md-sys-color-secondary-container);
   border-color: transparent;
@@ -620,7 +633,8 @@ body {
   background: var(--md-sys-color-outline-variant);
   border-radius: var(--md-sys-shape-corner-full);
 }
-.md3-log .ln { color: var(--md-sys-color-on-surface-variant); }
+.md3-log .ln { color: var(--md-sys-color-on-surface-variant); animation: lnIn var(--md-sys-motion-duration-short3) var(--md-sys-motion-easing-standard); }
+@keyframes lnIn { from { opacity: 0; } }
 .md3-log .ln.err { color: var(--md-sys-color-error); }
 .md3-log .ln .ts { color: var(--md-sys-color-outline); margin-right: 8px; }
 
@@ -694,4 +708,10 @@ body {
   text-align: center;
   color: var(--md-sys-color-on-surface-variant);
   padding: 28px 16px;
+}
+
+/* 动效降级: 系统关闭动画时 */
+@media (prefers-reduced-motion: reduce) {
+  .md3-app, .md3-page.active, .md3-log .ln { animation: none !important; }
+  * { transition-duration: 0s !important; }
 }

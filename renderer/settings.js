@@ -34,13 +34,20 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
 
   // ---------------------------------------------------------------- 侧边导航
   const pages = document.querySelectorAll('.md3-page');
+  const navOrder = ['general', 'stats', 'mixer', 'logs'];
+  let prevNav = 'general';
   document.querySelectorAll('.md3-nav-item').forEach((btn) => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.md3-nav-item').forEach((b) => b.classList.toggle('active', b === btn));
       const target = btn.dataset.page;
+      // 方向感知: 决定页面滑入方向
+      const content = document.querySelector('.md3-content');
+      content.dataset.dir = navOrder.indexOf(target) >= navOrder.indexOf(prevNav) ? 'fwd' : 'back';
+      prevNav = target;
       pages.forEach((pg) => pg.classList.toggle('active', pg.id === 'page-' + target));
-      if (target === 'stats') refresh(); // 页面显示后重绘图表(隐藏时宽度为 0)
+      if (target === 'stats') refresh(true); // 页面显示后重绘图表(带生长动画)
       if (target === 'logs') loadLogs();
+      if (target === 'mixer') loadMixer();
     });
   });
 
@@ -439,7 +446,7 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
   }
 
   // ---------------------------------------------------------------- 图表: 近14天柱状
-  function drawDays(days) {
+  function drawDays(days, anim) {
     const vals = [], labels = [];
     for (let i = 13; i >= 0; i--) {
       const d = new Date(Date.now() - i * 864e5);
@@ -448,29 +455,35 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
       labels.push(String(d.getDate()).padStart(2, '0'));
     }
     const { g, w, h } = setupCanvas(chartDays);
-    g.clearRect(0, 0, w, h);
     const padL = 6, padR = 6, padT = 18, barGap = 5;
     const n = vals.length;
     const bw = Math.max(8, (w - padL - padR - barGap * (n - 1)) / n);
     const maxV = Math.max(...vals, 60);
     const plotH = h - padT;
 
-    for (let i = 0; i < n; i++) {
-      const x = padL + i * (bw + barGap);
-      const bh = Math.max(vals[i] > 0 ? 3 : 1.5, (vals[i] / maxV) * plotH);
-      const y = h - bh;
-      // 柱体 (primary / surface 10%)
-      g.fillStyle = vals[i] > 0 ? TOK.primary : rgba(TOK.onSurface, .10);
-      roundRect(g, x, y, bw, bh, Math.min(4, bw / 2));
-      g.fill();
-      // 时长标注 (on-surface 55%)
-      if (vals[i] > 0 && bh > padT - 6) {
-        g.fillStyle = rgba(TOK.onSurface, .55);
-        g.font = '9px Segoe UI';
-        g.textAlign = 'center';
-        g.fillText(shortDur(vals[i]), x + bw / 2, y - 4);
+    const draw = (p) => {
+      g.clearRect(0, 0, w, h);
+      for (let i = 0; i < n; i++) {
+        const x = padL + i * (bw + barGap);
+        const full = Math.max(vals[i] > 0 ? 3 : 1.5, (vals[i] / maxV) * plotH);
+        const bh = Math.max(vals[i] > 0 ? 3 : 1.5, full * p);
+        const y = h - bh;
+        // 柱体 (primary / surface 10%)
+        g.fillStyle = vals[i] > 0 ? TOK.primary : rgba(TOK.onSurface, .10);
+        roundRect(g, x, y, bw, bh, Math.min(4, bw / 2));
+        g.fill();
+        // 时长标注 (on-surface 55%, 随进度淡入)
+        if (vals[i] > 0 && full > padT - 6) {
+          g.globalAlpha = p;
+          g.fillStyle = rgba(TOK.onSurface, .55);
+          g.font = '9px Segoe UI';
+          g.textAlign = 'center';
+          g.fillText(shortDur(vals[i]), x + bw / 2, h - full - 4);
+          g.globalAlpha = 1;
+        }
       }
-    }
+    };
+    if (anim) animateChart((e) => draw(e)); else draw(1);
     // x 轴日期标签
     dayLabels.innerHTML = '';
     labels.forEach((t) => {
@@ -478,6 +491,19 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
       s.textContent = t;
       dayLabels.appendChild(s);
     });
+  }
+
+  // 图表生长动画: rAF + 减速缓动 (新动画启动时取消旧动画)
+  let chartRaf = null;
+  function animateChart(draw) {
+    if (chartRaf) cancelAnimationFrame(chartRaf);
+    const t0 = performance.now();
+    const frame = (now) => {
+      const t = Math.min(1, (now - t0) / 450);
+      draw(1 - Math.pow(1 - t, 3));
+      if (t < 1) chartRaf = requestAnimationFrame(frame);
+    };
+    chartRaf = requestAnimationFrame(frame);
   }
 
   function roundRect(g, x, y, w, h, r) {
@@ -492,13 +518,12 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
   }
 
   // ---------------------------------------------------------------- 图表: Top8 横向条
-  function drawTop(tracks) {
+  function drawTop(tracks, anim) {
     const list = Object.values(tracks)
       .sort((a, b) => (b.sec || 0) - (a.sec || 0))
       .slice(0, 8);
     const { g, w } = setupCanvas(chartTop);
     const h = parseInt(chartTop.getAttribute('height'), 10);
-    g.clearRect(0, 0, w, h);
     if (!list.length) {
       g.fillStyle = rgba(TOK.onSurface, .30);
       g.font = '12px Segoe UI';
@@ -511,7 +536,7 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
     const barMax = w - nameW - 52;
     const maxV = Math.max(...list.map((t) => t.sec || 0), 1);
 
-    list.forEach((t, i) => {
+    const drawRow = (t, i, p) => {
       const cy = i * rowH + rowH / 2;
       // 曲名 (on-surface 85%)
       g.fillStyle = rgba(TOK.onSurface, .85);
@@ -522,7 +547,7 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
       while (name.length > 3 && g.measureText(name).width > nameW - 8) name = name.slice(0, -2) + '…';
       g.fillText(name, 4, cy);
       // 条 (primary)
-      const bw = Math.max(3, ((t.sec || 0) / maxV) * barMax);
+      const bw = Math.max(3, ((t.sec || 0) / maxV) * barMax * p);
       g.fillStyle = TOK.primary;
       roundRect(g, nameW, cy - 5, bw, 10, 5);
       g.fill();
@@ -531,7 +556,21 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
       g.font = '10px Segoe UI';
       g.textAlign = 'right';
       g.fillText(shortDur(t.sec || 0), w - 4, cy);
-    });
+    };
+    if (anim) {
+      const t0 = performance.now();
+      const frame = (now) => {
+        const t = Math.min(1, (now - t0) / 450);
+        const e = 1 - Math.pow(1 - t, 3);
+        g.clearRect(0, 0, w, h);
+        list.forEach((t2, i) => drawRow(t2, i, e));
+        if (t < 1) requestAnimationFrame(frame);
+      };
+      requestAnimationFrame(frame);
+    } else {
+      g.clearRect(0, 0, w, h);
+      list.forEach((t, i) => drawRow(t, i, 1));
+    }
     g.textBaseline = 'alphabetic';
   }
 
@@ -563,7 +602,7 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
   }
 
   // ---------------------------------------------------------------- 加载/刷新
-  async function refresh() {
+  async function refresh(anim) {
     try {
       const st = await api.getStats();
       lastStats = st;
@@ -571,8 +610,8 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
       for (const k of Object.keys(st.days || {})) total += st.days[k];
       sumTotal.textContent = total >= 60 ? ('累计收听 ' + fmtSec(total)) : '';
       if (!statsPageVisible()) return; // 隐藏时 canvas 宽度为 0, 跳过绘制
-      drawDays(st.days || {});
-      drawTop(st.tracks || {});
+      drawDays(st.days || {}, anim === true);
+      drawTop(st.tracks || {}, anim === true);
       drawTable(st.tracks || {});
       drawHistory(st.history || []);
     } catch { }
