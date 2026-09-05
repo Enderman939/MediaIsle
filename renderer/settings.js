@@ -78,6 +78,7 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
     [swGlass, swDlyr, swBi, swAuto, swFs, swTb].forEach(syncSwitch);
     selPos.value = cfg.islandPos === 'bottom' ? 'bottom' : 'top';
     syncSelLabel(selPos);
+    syncSelLabel(selSleep);
     lyrSources = (Array.isArray(cfg.lyrSources) && cfg.lyrSources.length) ? cfg.lyrSources.slice() : ['soda', 'netease', 'qq', 'kugou'];
     renderChips();
     selStrategy.value = cfg.lyrStrategy === 'quality' ? 'quality' : 'race';
@@ -593,5 +594,6 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
     }
   }
   api.onStatsUpdated(refresh);
+  api.getCfg().then(applyCfg).catch(() => { });
   refresh();
 })();

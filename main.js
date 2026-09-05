@@ -1667,6 +1667,9 @@ if (!app.requestSingleInstanceLock()) {
     createTray();
     if (cfg.dlyr) ensureDlyrics();
     screen.on('display-metrics-changed', positionDlyrics);
+    console.log('[start] MediaIsle', app.getVersion(), '| build:', localBuildDate || '(源代码)');
+    // 调试: MEDIAISLE_SETTINGS=1 启动时直接打开设置窗口
+    if (process.env.MEDIAISLE_SETTINGS === '1') createSettingsWindow();
     // 打包版: 启动 30s 后后台检查更新
     if (app.isPackaged && localBuildDate) {
       setTimeout(() => runUpdateCheck(false).catch(() => { }), 30e3);
