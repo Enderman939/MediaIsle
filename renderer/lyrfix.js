@@ -6,6 +6,7 @@
   const srcName = { soda: '汽水', netease: '网易', qq: 'QQ', kugou: '酷狗' };
 
   document.getElementById('btnClose').addEventListener('click', () => window.close());
+  document.getElementById('btnMin').addEventListener('click', () => window.island.winCtrl('minimize'));
 
   const fmtDur = (s) => (s > 0 ? Math.floor(s / 60) + ':' + String(Math.round(s % 60)).padStart(2, '0') : '');
 

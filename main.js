@@ -818,11 +818,12 @@ function createSettingsWindow() {
   setWin.on('closed', () => { setWin = null; });
 }
 
-// 自绘标题栏窗口控制(仅设置窗口自身可调用)
+// 自绘标题栏窗口控制(设置窗口 / 歌词纠错窗口)
 ipcMain.on('win-ctrl', (e, action) => {
-  if (!setWin || setWin.isDestroyed() || e.sender !== setWin.webContents) return;
-  if (action === 'minimize') setWin.minimize();
-  else if (action === 'close') setWin.close();
+  const w = [setWin, lyrFixWin].find((x) => x && !x.isDestroyed() && x.webContents === e.sender);
+  if (!w) return;
+  if (action === 'minimize') w.minimize();
+  else if (action === 'close') w.close();
 });
 
 ipcMain.handle('cfg-get', () => ({
@@ -1507,6 +1508,7 @@ ipcMain.handle('lyrfix-open', (_e, ctx) => {
     minHeight: 420,
     title: '歌词纠错 - MediaIsle',
     backgroundColor: '#141218',
+    frame: false,
     autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, spellcheck: false },
   });
