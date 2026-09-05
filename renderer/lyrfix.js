@@ -55,7 +55,7 @@
           row.classList.add('picked');
           status.textContent = '已应用，岛体歌词已更新 ✓';
         } else {
-          status.textContent = '应用失败，请重试其他候选';
+          status.textContent = '应用失败' + (r && r.message ? '：' + r.message : '，请重试其他候选');
         }
       });
       list.appendChild(row);

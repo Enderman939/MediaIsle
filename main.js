@@ -488,7 +488,7 @@ async function checkForUpdate() {
     const local = Date.parse(localBuildDate);
     if (!(remote > 0) || !(local > 0)) return null;
     // 容忍 60s 时钟偏差
-    if (remote - local > 60e3) return { version: info.version || '', buildDate: info.buildDate, zip: info.zip || '' };
+    if (remote - local > 60e3) return { version: info.version || '', buildDate: info.buildDate, zip: info.zip || '', sha256: info.sha256 || '' };
   } catch { }
   return null;
 }
@@ -523,10 +523,21 @@ function emitDownloadProgress(received, total, t0) {
   send2('update-status', { stage: 'download', ...updateProg });
 }
 
-async function singleDownload(url) {
-  const res = await net.fetch(url);
+// 停滞看门狗: 进度停止推进 12s 视为通道失效, 中止并切换下一候选
+function makeStallGuard() {
+  const ac = new AbortController();
+  let timer = setTimeout(() => ac.abort(new Error('STALL')), 12000);
+  return {
+    signal: ac.signal,
+    kick() { clearTimeout(timer); timer = setTimeout(() => ac.abort(new Error('STALL')), 12000); },
+    cancel() { clearTimeout(timer); },
+  };
+}
+
+async function singleDownload(url, guard) {
+  const res = await net.fetch(url, { signal: guard.signal });
   if (!res.ok) throw new Error('HTTP ' + res.status);
-  const total = Number(res.headers.get('content-length')) || 0;
+  const total = Number(res.headers.get("content-length")) || 0;
   const reader = res.body.getReader();
   const chunks = [];
   let received = 0;
@@ -536,6 +547,7 @@ async function singleDownload(url) {
     if (done) break;
     chunks.push(value);
     received += value.length;
+    guard.kick();
     emitDownloadProgress(received, total, t0);
   }
   emitDownloadProgress._last = 0;
@@ -544,7 +556,7 @@ async function singleDownload(url) {
   return Buffer.concat(chunks);
 }
 
-async function parallelDownload(url, total) {
+async function parallelDownload(url, total, guard) {
   const big = Buffer.alloc(total);
   const SEGMENTS = 32;
   const CONCURRENCY = 8;
@@ -572,17 +584,18 @@ async function parallelDownload(url, total) {
     let lastErr = null;
     for (let t = 0; t < 3; t++) {
       try {
-        const r = await net.fetch(url, { headers: { Range: `bytes=${start}-${end}` } });
+        const r = await net.fetch(url, { headers: { Range: `bytes=${start}-${end}` }, signal: guard.signal });
         if (r.status !== 206) throw new Error('RANGE_UNSUPPORTED(' + r.status + ')');
         const buf = Buffer.from(await r.arrayBuffer());
         if (buf.length !== end - start + 1) throw new Error('SIZE_MISMATCH');
         big.set(buf, start);
         doneBytes += buf.length;
+        guard.kick();
         prog();
         return;
       } catch (e) {
         lastErr = e;
-        if (String(e.message || '').startsWith('RANGE_UNSUPPORTED')) throw e;
+        if (String((e && e.message) || '').startsWith('RANGE_UNSUPPORTED')) throw e;
         await sleep(400);
       }
     }
@@ -601,22 +614,49 @@ async function parallelDownload(url, total) {
   return big;
 }
 
-async function downloadUpdate(url) {
+// 单一候选: 并行优先, 回退单流 (带停滞看门狗)
+async function downloadOne(url) {
   let total = 0;
   let ranges = false;
   try {
     const head = await net.fetch(url, { method: 'HEAD' });
-    total = Number(head.headers.get('content-length')) || 0;
+    total = Number(head.headers.get("content-length")) || 0;
     ranges = (head.headers.get('accept-ranges') || '').toLowerCase().includes('bytes');
   } catch { }
-  if (total > 0 && ranges && total >= 8 * 1048576) {
+  const guard = makeStallGuard();
+  try {
+    if (total > 0 && ranges && total >= 4 * 1048576) {
+      try {
+        return await parallelDownload(url, total, guard);
+      } catch (e) {
+        console.error('[update] 并行下载失败, 回退单流:', (e && e.message) || e);
+      }
+    }
+    return await singleDownload(url, guard);
+  } finally {
+    guard.cancel();
+  }
+}
+
+// 候选链下载: 镜像优先 + 直连兜底, 每个候选下载后校验 SHA256
+async function downloadUpdate(candidates, sha256) {
+  let lastErr = null;
+  for (const url of candidates) {
     try {
-      return await parallelDownload(url, total);
+      const data = await downloadOne(url);
+      if (sha256) {
+        const hash = require('crypto').createHash('sha256').update(data).digest('hex');
+        if (hash !== sha256) throw new Error('SHA256 校验失败(下载不完整或被篡改)');
+      }
+      emitDownloadProgress._last = 0;
+      updateProg = { received: data.length, total: data.length, percent: 100, speed: updateProg.speed };
+      return data;
     } catch (e) {
-      console.error('[update] 并行下载失败, 回退单流:', (e && e.message) || e);
+      console.error('[update] 候选下载失败:', url.slice(0, 90), (e && e.message) || e);
+      lastErr = e;
     }
   }
-  return await singleDownload(url);
+  throw lastErr || new Error('all candidates failed');
 }
 
 async function applyUpdate() {
@@ -633,7 +673,15 @@ async function applyUpdate() {
     updateStage = 'download';
     updateProg = { received: 0, total: 0, percent: 0, speed: 0 };
     send2('update-status', { stage: updateStage });
-    const data = await downloadUpdate('https://github.com/' + REPO + '/releases/latest/download/' + encodeURIComponent(avail.zip));
+    // 候选链: 镜像加速优先(sha256 校验防篡改), 直连兜底
+    const gh = 'https://github.com/' + REPO + '/releases/latest/download/' + encodeURIComponent(avail.zip);
+    const candidates = [
+      'https://ghfast.top/' + gh,
+      'https://gh-proxy.com/' + gh,
+      'https://github.moeyy.xyz/' + gh,
+      gh,
+    ];
+    const data = await downloadUpdate(candidates, avail.sha256);
     fs.writeFileSync(zipPath, data);
 
     updateStage = 'extract';
@@ -1520,6 +1568,7 @@ ipcMain.handle('lyrfix-open', (_e, ctx) => {
 ipcMain.handle('lyrfix-context', () => lyrFixCtx || {});
 
 async function fetchLyricByKey(src, key) {
+  const signal = AbortSignal.timeout(8000);
   if (src === 'soda') {
     const cats = readSodaCatalog();
     const hit = cats.find((c) => String(c.id) === String(key));
@@ -1530,13 +1579,13 @@ async function fetchLyricByKey(src, key) {
     return { lines, trans: hit.t ? parseLrc(hit.t) : [], dur: hit.dur || 0 };
   }
   if (src === 'netease') {
-    const lr = await httpJson(`https://music.163.com/api/song/lyric?os=pc&id=${key}&lv=-1&kv=-1&tv=-1`, { ...H_UA, Referer: 'https://music.163.com/' });
+    const lr = await httpJson(`https://music.163.com/api/song/lyric?os=pc&id=${key}&lv=-1&kv=-1&tv=-1`, { ...H_UA, Referer: 'https://music.163.com/' }, signal);
     const lines = parseLrc(lr && lr.lrc && lr.lrc.lyric);
     if (!lines.length) return null;
     return { lines, trans: parseLrc(lr && lr.tlyric && lr.tlyric.lyric), dur: 0 };
   }
   if (src === 'qq') {
-    const lr = await httpJson(`https://u.y.qq.com/cgi-bin/musicu.fcg?format=json&data=${encodeURIComponent(JSON.stringify({ comm: { ct: 19, cv: 1873, uin: '' }, req_1: { module: 'music.musichallSong.PlayLyricInfo', method: 'GetPlayLyricInfo', param: { songMID: key, songID: 0, isFormat: false, trans: 1 } } }))}`, { ...H_UA, Referer: 'https://y.qq.com/' });
+    const lr = await httpJson(`https://u.y.qq.com/cgi-bin/musicu.fcg?format=json&data=${encodeURIComponent(JSON.stringify({ comm: { ct: 19, cv: 1873, uin: '' }, req_1: { module: 'music.musichallSong.PlayLyricInfo', method: 'GetPlayLyricInfo', param: { songMID: key, songID: 0, isFormat: false, trans: 1 } } }))}`, { ...H_UA, Referer: 'https://y.qq.com/' }, signal);
     const d = lr && lr.req_1 && lr.req_1.data;
     const lines = parseLrc(maybeB64(d && d.lyric));
     if (!lines.length) return null;
@@ -1544,11 +1593,11 @@ async function fetchLyricByKey(src, key) {
   }
   if (src === 'kugou') {
     const [hash, aaid] = String(key).split('|');
-    const cs = await httpJson(`https://krcs.kugou.com/search?ver=1&man=yes&client=mobi&hash=${hash}&album_audio_id=${aaid || ''}`, H_UA);
+    const cs = await httpJson(`https://krcs.kugou.com/search?ver=1&man=yes&client=mobi&hash=${hash}&album_audio_id=${aaid || ''}`, H_UA, signal);
     const cand = cs && cs.candidates && cs.candidates[0];
     if (!cand || !cand.id) return null;
     const aKey = cand.accesskey || cand.access_key || '';
-    const kr = await httpJson(`https://lyrics.kugou.com/download?ver=1&client=pc&id=${cand.id}&accesskey=${aKey}&fmt=krc&charset=utf8`, H_UA);
+    const kr = await httpJson(`https://lyrics.kugou.com/download?ver=1&client=pc&id=${cand.id}&accesskey=${aKey}&fmt=krc&charset=utf8`, H_UA, signal);
     if (kr && kr.content) {
       const parsed = parseKrc(kr.content);
       const lines = parsed ? parsed.entries.map(({ t, x }) => ({ t, x })) : [];
@@ -1606,14 +1655,23 @@ ipcMain.handle('lyr-pick', async (_e, p) => {
   try {
     const { songKey, src, key } = p || {};
     if (!songKey || !src || !key) return { ok: false };
-    const r = await fetchLyricByKey(src, key);
-    if (!r || !r.lines || !r.lines.length) return { ok: false };
-    lyrPicks[songKey.toLowerCase()] = { src, key };
-    savePicks();
-    lyrCache.set(songKey.toLowerCase(), { lines: r.lines, src: src + ' · 手动', dur: r.dur || 0, trans: r.trans || [] });
-    // 通知岛体按手选结果重抓
-    send('lyrics-refetch');
-    return { ok: true };
+    let lastMsg = '';
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const r = await fetchLyricByKey(src, key);
+        if (!r || !r.lines || !r.lines.length) { lastMsg = '该候选没有可用歌词'; break; }
+        lyrPicks[songKey.toLowerCase()] = { src, key };
+        savePicks();
+        lyrCache.set(songKey.toLowerCase(), { lines: r.lines, src: src + ' · 手动', dur: r.dur || 0, trans: r.trans || [] });
+        // 通知岛体按手选结果重抓
+        send('lyrics-refetch');
+        return { ok: true };
+      } catch (e) {
+        lastMsg = (e && e.message) || String(e);
+        await sleep(600);
+      }
+    }
+    return { ok: false, message: lastMsg };
   } catch (e) {
     return { ok: false, message: (e && e.message) || String(e) };
   }
