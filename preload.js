@@ -54,7 +54,9 @@ contextBridge.exposeInMainWorld('island', {
   // 定时停止
   sleepGet: () => ipcRenderer.invoke('sleep-get'),
   sleepSet: (minutes) => ipcRenderer.invoke('sleep-set', minutes),
-  // 歌词纠错
+  // 歌词纠错(独立窗口)
+  lyrFixOpen: (ctx) => ipcRenderer.invoke('lyrfix-open', ctx),
+  lyrFixContext: () => ipcRenderer.invoke('lyrfix-context'),
   lyrCandidates: (q) => ipcRenderer.invoke('lyr-candidates', q),
   lyrPick: (p) => ipcRenderer.invoke('lyr-pick', p),
 });

@@ -87,8 +87,7 @@ body {
 #island[data-state="notify"]         .face-notify,
 #island[data-state="expanded"]       .face-expanded,
 #island[data-state="expanded-empty"] .face-empty,
-#island[data-state="favlist"]        .face-favlist,
-#island[data-state="lyrpick"]        .face-lyrpick {
+#island[data-state="favlist"]        .face-favlist {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
@@ -575,7 +574,7 @@ body.glass .e-lyrics::after  { background: linear-gradient(rgba(24,24,30,0), rgb
 }
 
 /* ---------------------------------------------------------------- 收藏列表面板 / 歌词纠错面板 */
-.face-favlist, .face-lyrpick { flex-direction: column; padding: 14px 16px; gap: 8px; }
+.face-favlist { flex-direction: column; padding: 14px 16px; gap: 8px; }
 .fl-head { display: flex; align-items: center; gap: 10px; flex: none; }
 .fl-title { flex: 1; font-size: 14px; font-weight: 600; color: #fff; }
 .fl-count { font-size: 11px; color: rgba(255, 255, 255, .4); }
@@ -636,16 +635,6 @@ body.glass .e-lyrics::after  { background: linear-gradient(rgba(24,24,30,0), rgb
   line-height: 1.7;
 }
 
-/* 候选来源标签 */
-.fl-src {
-  flex: none;
-  font-size: 10px;
-  line-height: 1;
-  padding: 3px 7px;
-  border-radius: 999px;
-  background: rgba(208, 188, 255, .16);
-  color: #d0bcff;
-}
 
 /* 展开面板底部纠错按钮 */
 .e-foot .btn-xs { color: rgba(255, 255, 255, .55); }

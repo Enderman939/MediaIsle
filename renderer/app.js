@@ -735,7 +735,7 @@
   // ---------------------------------------------------------------- 悬停
   // 悬停检测由主进程光标轮询完成, 这里只响应结果
   api.onHover((inside) => {
-    if (lyrPickOpen || favOpen) return; // 面板打开时完全忽略悬停变化
+    if (favOpen) return; // 面板打开时完全忽略悬停变化
     hovered = inside;
     if (inside) {
       setState(expandState());
@@ -796,71 +796,11 @@
     setState(hovered ? expandState() : autoState());
   });
 
-  // ---------------------------------------------------------------- 歌词纠错
-  const lpBack = $('lpBack'), lpList = $('lpList'), lpCount = $('lpCount');
-  let lyrPickOpen = false;
-  function openLyrPick() {
-    if (!S.hasSession || !S.title) return;
-    lyrPickOpen = true;
-    // 面板比展开态窄: 钉住悬停, 防止鼠标落在新矩形外触发塌缩
-    api.setDragging(true);
-    lpList.innerHTML = '';
-    lpCount.textContent = '';
-    const load = document.createElement('div');
-    load.className = 'fl-empty';
-    load.textContent = '正在搜索候选…';
-    lpList.appendChild(load);
-    setState('lyrpick');
-    api.lyrCandidates({ title: S.title, artist: S.artist, duration: S.duration }).then((cands) => {
-      if (!lyrPickOpen) return;
-      lpList.innerHTML = '';
-      if (!cands || !cands.length) {
-        const d = document.createElement('div');
-        d.className = 'fl-empty';
-        d.textContent = '未找到候选歌词';
-        lpList.appendChild(d);
-        return;
-      }
-      lpCount.textContent = cands.length + ' 个候选';
-      const srcName = { soda: '汽水', netease: '网易', qq: 'QQ', kugou: '酷狗' };
-      for (const c of cands) {
-        const row = document.createElement('div');
-        row.className = 'fl-row';
-        const src = document.createElement('span');
-        src.className = 'fl-src';
-        src.textContent = srcName[c.src] || c.src;
-        const t = document.createElement('span');
-        t.className = 'fl-t';
-        t.textContent = c.name;
-        const a = document.createElement('span');
-        a.className = 'fl-a';
-        a.textContent = [c.artist, c.dur > 0 ? fmt(c.dur) : ''].filter(Boolean).join(' · ');
-        row.appendChild(src); row.appendChild(t); row.appendChild(a);
-        row.addEventListener('click', async (ev) => {
-          ev.stopPropagation();
-          const r = await api.lyrPick({ songKey: (S.title + '|' + S.artist), src: c.src, key: c.key });
-          if (r && r.ok) {
-            lyrPickOpen = false;
-            api.setDragging(false);
-            api.getLyrics({ title: S.title, artist: S.artist, duration: S.duration }).then((lr) => {
-              S.lyrics = (lr && lr.lines) || [];
-              S.trans = (lr && lr.trans) || [];
-              if (lr && lr.dur > 0 && !(S.duration > 0)) S.duration = lr.dur;
-              curLineIdx = -1;
-              lyricsBuiltKey = '';
-              setState(hovered ? expandState() : autoState());
-              render();
-            }).catch(() => { });
-          }
-        });
-        lpList.appendChild(row);
-      }
-    }).catch(() => { });
-  }
-  lpBack.addEventListener('click', (e) => { e.stopPropagation(); lyrPickOpen = false; api.setDragging(false); setState(hovered ? expandState() : autoState()); });
+  // ---------------------------------------------------------------- 歌词纠错(独立窗口)
+  const openLyricFix = () => { if (S.hasSession && S.title && api.lyrFixOpen) api.lyrFixOpen({ title: S.title, artist: S.artist, duration: S.duration }); };
   const btnLyrFix = $('btnLyrFix');
-  btnLyrFix.addEventListener('click', (e) => { e.stopPropagation(); openLyrPick(); });
-  eLyrics.addEventListener('contextmenu', (e) => { e.preventDefault(); openLyrPick(); });
+  btnLyrFix.addEventListener('click', (e) => { e.stopPropagation(); openLyricFix(); });
+  eLyrics.addEventListener('contextmenu', (e) => { e.preventDefault(); openLyricFix(); });
 
   // ---------------------------------------------------------------- 毛玻璃 / 双语字幕 / 字号
   api.onGlass((g) => document.body.classList.toggle('glass', !!g));

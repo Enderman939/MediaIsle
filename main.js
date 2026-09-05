@@ -388,7 +388,6 @@ const ISLAND_RECTS = {
   expanded:       { w: 672, h: 214 },
   'expanded-empty': { w: 406, h: 214 },
   favlist:        { w: 406, h: 214 },
-  lyrpick:        { w: 406, h: 214 },
 };
 const ISLAND_TOP = 3; // 岛距窗口顶部偏移(stage padding-top)
 
@@ -1488,6 +1487,31 @@ function savePicks() {
   try { fs.writeFileSync(path.join(app.getPath('userData'), 'lyr-picks.json'), JSON.stringify(lyrPicks)); } catch { }
 }
 
+// 纠错窗口: 独立普通窗口, 不参与岛体状态机
+let lyrFixWin = null;
+let lyrFixCtx = null;
+ipcMain.handle('lyrfix-open', (_e, ctx) => {
+  const songKey = (((ctx && ctx.title) || '') + '|' + ((ctx && ctx.artist) || '')).toLowerCase();
+  const picked = lyrPicks[songKey];
+  lyrFixCtx = { ...(ctx || {}), pickedKey: (picked && picked.key) || '' };
+  if (lyrFixWin && !lyrFixWin.isDestroyed()) { lyrFixWin.focus(); return { ok: true }; }
+  lyrFixWin = new BrowserWindow({
+    width: 480,
+    height: 580,
+    minWidth: 380,
+    minHeight: 420,
+    title: '歌词纠错 - MediaIsle',
+    backgroundColor: '#141218',
+    autoHideMenuBar: true,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, spellcheck: false },
+  });
+  lyrFixWin.loadFile(path.join(__dirname, 'renderer', 'lyrfix.html'));
+  attachConsoleForward(lyrFixWin, 'lyrfix');
+  lyrFixWin.on('closed', () => { lyrFixWin = null; });
+  return { ok: true };
+});
+ipcMain.handle('lyrfix-context', () => lyrFixCtx || {});
+
 async function fetchLyricByKey(src, key) {
   if (src === 'soda') {
     const cats = readSodaCatalog();
@@ -1580,6 +1604,8 @@ ipcMain.handle('lyr-pick', async (_e, p) => {
     lyrPicks[songKey.toLowerCase()] = { src, key };
     savePicks();
     lyrCache.set(songKey.toLowerCase(), { lines: r.lines, src: src + ' · 手动', dur: r.dur || 0, trans: r.trans || [] });
+    // 通知岛体按手选结果重抓
+    send('lyrics-refetch');
     return { ok: true };
   } catch (e) {
     return { ok: false, message: (e && e.message) || String(e) };
