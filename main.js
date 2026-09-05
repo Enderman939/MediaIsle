@@ -89,7 +89,7 @@ ipcMain.on('log-clear', () => { logBuf.length = 0; });
 
 // 配置持久化(毛玻璃/桌面歌词)
 const CFG_FILE = path.join(app.getPath('userData'), 'config.json');
-let cfg = { glass: false, dlyr: false, fsHide: true, bilingual: true, lyrSize: 12.5, dlyrSize: 32, dlyrSubSize: 17, islandPos: 'top', taskbar: false, lyrSources: ['soda', 'netease', 'qq', 'kugou'], lyrStrategy: 'race' };
+let cfg = { glass: false, dlyr: false, fsHide: true, bilingual: true, lyrSize: 12.5, dlyrSize: 32, dlyrSubSize: 17, islandPos: 'top', taskbar: false, lyrPickSave: true, lyrSources: ['soda', 'netease', 'qq', 'kugou'], lyrStrategy: 'race' };
 try {
   const raw = fs.readFileSync(CFG_FILE, 'utf8').replace(/^\uFEFF/, '');
   Object.assign(cfg, JSON.parse(raw));
@@ -838,6 +838,7 @@ ipcMain.handle('cfg-get', () => ({
   dlyrSubSize: cfg.dlyrSubSize || 17,
   islandPos: cfg.islandPos === 'bottom' ? 'bottom' : 'top',
   taskbar: !!cfg.taskbar,
+  lyrPickSave: cfg.lyrPickSave !== false,
   version: app.getVersion(),
 }));
 
@@ -905,6 +906,9 @@ ipcMain.handle('cfg-set', (_e, key, val) => {
       hiddenByFs = false;
       if (!hiddenByUser && win && !win.isDestroyed()) win.showInactive();
     }
+  } else if (key === 'lyrPickSave') {
+    cfg.lyrPickSave = !!val;
+    saveCfg();
   } else if (key === 'islandPos') {
     if (val === 'top' || val === 'bottom') {
       cfg.islandPos = val;
@@ -934,6 +938,7 @@ ipcMain.handle('cfg-set', (_e, key, val) => {
     dlyrSubSize: cfg.dlyrSubSize || 17,
     islandPos: cfg.islandPos === 'bottom' ? 'bottom' : 'top',
     taskbar: !!cfg.taskbar,
+    lyrPickSave: cfg.lyrPickSave !== false,
     version: app.getVersion(),
   };
 });
@@ -1413,8 +1418,8 @@ async function fetchLyrics(query) {
   const key = (title + '|' + artist).toLowerCase();
   if (lyrCache.has(key)) return lyrCache.get(key);
 
-  // 用户手动选定的歌词优先
-  const pick = lyrPicks[key];
+  // 用户手动选定的歌词优先 (可在设置中关闭保存)
+  const pick = cfg.lyrPickSave !== false ? lyrPicks[key] : undefined;
   if (pick) {
     try {
       const r = await fetchLyricByKey(pick.src, pick.key);
