@@ -333,14 +333,16 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
   const updFill = document.getElementById('updFill');
   const updTxt = document.getElementById('updTxt');
   const mb = (n) => (n / 1048576).toFixed(1) + ' MB';
-  async function refreshUpdate() {
+  async function refreshUpdate(force) {
     if (!api.updateGet) return;
     try {
-      const st = await api.updateGet();
+      const st = await api.updateGet(force === true);
+      btnRecheck.disabled = !!st.busy;
       if (!st.packaged) {
         updTitle.textContent = '当前为源代码运行';
         updSub.textContent = '开发模式不检查更新';
         btnUpdate.hidden = true;
+        btnRecheck.hidden = true;
         updProg.hidden = true;
         return;
       }
@@ -378,8 +380,17 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
     } catch { }
   }
   if (api.onUpdateStatus) api.onUpdateStatus(() => refreshUpdate());
+  const btnRecheck = document.getElementById('btnRecheck');
+  if (btnRecheck) btnRecheck.addEventListener('click', async () => {
+    btnRecheck.disabled = true;
+    updTitle.textContent = '正在检查更新…';
+    updSub.textContent = '';
+    try { await api.updateGet(true); } catch { }
+    btnRecheck.disabled = false;
+    await refreshUpdate(true);
+  });
   if (btnUpdate) btnUpdate.addEventListener('click', async () => { btnUpdate.disabled = true; try { await api.updateApply(); } catch { } refreshUpdate(); });
-  refreshUpdate();
+  refreshUpdate(true);
 
   // ---------------------------------------------------------------- 工具
   // MD3 令牌读取 (图表绘制需要具体色值, 从 CSS 令牌解析)

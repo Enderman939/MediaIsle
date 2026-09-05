@@ -750,8 +750,8 @@ function updateThumbar() {
   } catch { }
 }
 
-ipcMain.handle('update-get', async () => {
-  if (app.isPackaged && localBuildDate) await runUpdateCheck(false);
+ipcMain.handle('update-get', async (_e, force) => {
+  if (app.isPackaged && localBuildDate) await runUpdateCheck(force === true);
   return { packaged: !!app.isPackaged, localBuildDate, available: updateAvail, stage: updateStage, busy: updateBusy, prog: updateProg };
 });
 ipcMain.handle('update-apply', () => applyUpdate());

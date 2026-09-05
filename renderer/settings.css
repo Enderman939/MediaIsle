@@ -484,6 +484,13 @@ body {
 }
 .md3-btn:disabled { opacity: .45; cursor: default; }
 
+.upd-btns {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* Linear Progress (MD3) - 更新下载进度 */
 .md3-progress-wrap { padding: 6px 16px 14px; }
 .md3-progress {

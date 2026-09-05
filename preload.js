@@ -41,7 +41,7 @@ contextBridge.exposeInMainWorld('island', {
   // 自绘标题栏窗口控制(设置窗口)
   winCtrl: (action) => ipcRenderer.send('win-ctrl', action),
   // 自动更新(打包版): 状态查询 / 执行更新 / 进度推送
-  updateGet: () => ipcRenderer.invoke('update-get'),
+  updateGet: (force) => ipcRenderer.invoke('update-get', force === true),
   updateApply: () => ipcRenderer.invoke('update-apply'),
   onUpdateStatus: (cb) => ipcRenderer.on('update-status', (_e, v) => cb(v)),
   // 运行日志
