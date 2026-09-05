@@ -1501,8 +1501,10 @@ async function fetchLyrics(query) {
         trans: r.trans || [],
       } : null));
 
+  // 主流程
+  let mainResult;
   if (strat === 'race') {
-    return new Promise((resolve) => {
+    mainResult = await new Promise((resolve) => {
       let pending = ps.length, done = false, bestDur = 0, bestTrans = [];
       ps.forEach((p) => p.then((r) => {
         if (r) {
@@ -1513,26 +1515,47 @@ async function fetchLyrics(query) {
         if (--pending === 0 && !done) { done = true; resolve(finish([], '', bestDur, bestTrans)); }
       }));
     });
+  } else {
+    // quality: 等全部完成, 按末句与曲目时长偏差择优, 同分按源优先级
+    const rs = await Promise.all(ps);
+    let bestDur = 0, bestTrans = [];
+    rs.forEach((r) => {
+      if (!r) return;
+      if (r.dur > bestDur) bestDur = r.dur;
+      if (r.trans && r.trans.length && !bestTrans.length) bestTrans = r.trans;
+    });
+    let best = null, bestScore = Infinity, bestIdx = Infinity;
+    rs.forEach((r, i) => {
+      if (!r || !r.lines.length) return;
+      const last = r.lines[r.lines.length - 1].t;
+      const score = (duration > 0) ? Math.abs(last - duration) : 1000 + i * 10;
+      if (score < bestScore || (score === bestScore && i < bestIdx)) { best = r; bestScore = score; bestIdx = i; }
+    });
+    mainResult = best ? finish(best.lines, best.src, best.dur, best.trans) : finish([], '', bestDur, bestTrans);
   }
 
-  // quality: 等全部完成, 按末句与曲目时长偏差择优, 同分按源优先级
-  const rs = await Promise.all(ps);
-  let bestDur = 0, bestTrans = [];
-  rs.forEach((r) => {
-    if (!r) return;
-    if (r.dur > bestDur) bestDur = r.dur;
-    if (r.trans && r.trans.length && !bestTrans.length) bestTrans = r.trans;
-  });
-  let best = null, bestScore = Infinity, bestIdx = Infinity;
-  rs.forEach((r, i) => {
-    if (!r || !r.lines.length) return;
-    const last = r.lines[r.lines.length - 1].t;
-    const score = (duration > 0) ? Math.abs(last - duration) : 1000 + i * 10;
-    if (score < bestScore || (score === bestScore && i < bestIdx)) { best = r; bestScore = score; bestIdx = i; }
-  });
-  return best ? finish(best.lines, best.src, best.dur, best.trans) : finish([], '', bestDur, bestTrans);
+  // 宽松回退: 主流程(严格歌手/时长匹配)未命中时, 逐源仅用标题重搜(跳过歌手匹配),
+  // 等同于手动纠错里用户看到的候选 —— 解决跨平台歌手名差异导致的漏抓
+  if (!mainResult.lines.length && artist) {
+    for (const s of enabled) {
+      try {
+        const r = await withTimeout(Promise.resolve().then(() => s.fn({ title, artist: '', duration })), 9000)
+          .then((r) => r ? {
+            lines: (r.lines && r.lines.length) ? r.lines : [],
+            src: (r.lines && r.lines.length) ? s.id : '',
+            dur: r.dur || 0,
+            trans: r.trans || [],
+          } : null);
+        if (r && r.lines.length) {
+          return finish(r.lines, s.id + ' · 宽松', r.dur, r.trans);
+        }
+      } catch { }
+    }
+  }
+
+  return mainResult;
 }
-// ---------------------------------------------------------------- 歌词手动纠错
+
 // 用户在候选列表手动选定歌词源与版本, 按曲目记忆 (lyr-picks.json),
 // fetchLyrics 命中手选记录时优先按选定源抓取
 let lyrPicks = {};
