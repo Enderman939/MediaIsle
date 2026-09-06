@@ -89,7 +89,7 @@ ipcMain.on('log-clear', () => { logBuf.length = 0; });
 
 // 配置持久化(毛玻璃/桌面歌词)
 const CFG_FILE = path.join(app.getPath('userData'), 'config.json');
-let cfg = { glass: false, dlyr: false, fsHide: true, bilingual: true, lyrSize: 12.5, dlyrSize: 32, dlyrSubSize: 17, islandPos: 'top', taskbar: false, lyrPickSave: true, lyrSources: ['soda', 'netease', 'qq', 'kugou'], lyrStrategy: 'race' };
+let cfg = { glass: false, dlyr: false, fsHide: true, bilingual: true, lyrSize: 12.5, dlyrSize: 32, dlyrSubSize: 17, islandPos: 'top', taskbar: false, lyrPickSave: true, expWidth: 0, lyrSources: ['soda', 'netease', 'qq', 'kugou'], lyrStrategy: 'race' };
 try {
   const raw = fs.readFileSync(CFG_FILE, 'utf8').replace(/^\uFEFF/, '');
   Object.assign(cfg, JSON.parse(raw));
@@ -260,6 +260,7 @@ function createWindow() {
     send('glass-changed', !!cfg.glass);
     send('bilingual-changed', cfg.bilingual !== false);
     send('lyr-size-changed', cfg.lyrSize || 12.5);
+    send('exp-width-changed', Number(cfg.expWidth) || 0);
   });
 
   // 调试: 转发渲染层 console 输出 (error/warning 级别同时写入 error.log)
@@ -397,11 +398,13 @@ let islandDragging = false;
 
 function islandScreenRect() {
   const s = ISLAND_RECTS[islandState] || ISLAND_RECTS.idle;
+  // 展开态宽度可由设置调整 (cfg.expWidth, 0 = 自动 672)
+  const w = islandState === 'expanded' ? (Number(cfg.expWidth) > 0 ? Number(cfg.expWidth) : 672) : s.w;
   const [wx, wy] = win.getPosition();
   return {
-    x: Math.round(wx + (WIN_W - s.w) / 2),
+    x: Math.round(wx + (WIN_W - w) / 2),
     y: wy + ISLAND_TOP,
-    w: s.w,
+    w,
     h: s.h,
   };
 }
@@ -802,6 +805,7 @@ ipcMain.handle('backup-import', async (_e, favs) => {
       send('glass-changed', !!cfg.glass);
       send('bilingual-changed', cfg.bilingual !== false);
       send('lyr-size-changed', cfg.lyrSize || 12.5);
+      send('exp-width-changed', Number(cfg.expWidth) || 0);
       try { if (win && !win.isDestroyed()) win.setSkipTaskbar(!cfg.taskbar); } catch { }
       try { if (dlWin && !dlWin.isDestroyed()) dlWin.webContents.send('dl-style', { size: cfg.dlyrSize || 32, subSize: cfg.dlyrSubSize || 17 }); } catch { }
       if (cfg.dlyr) ensureDlyrics(); else closeDlyrics();
@@ -888,6 +892,7 @@ ipcMain.handle('cfg-get', () => ({
   islandPos: cfg.islandPos === 'bottom' ? 'bottom' : 'top',
   taskbar: !!cfg.taskbar,
   lyrPickSave: cfg.lyrPickSave !== false,
+  expWidth: Number(cfg.expWidth) || 0,
   version: app.getVersion(),
 }));
 
@@ -928,6 +933,13 @@ ipcMain.handle('cfg-set', (_e, key, val) => {
       cfg.lyrSize = n;
       saveCfg();
       send('lyr-size-changed', cfg.lyrSize);
+    }
+  } else if (key === 'expWidth') {
+    const n = Number(val);
+    if (n === 0 || (isFinite(n) && n >= 420 && n <= 1280)) {
+      cfg.expWidth = n;
+      saveCfg();
+      send('exp-width-changed', n);
     }
   } else if (key === 'dlyrSize') {
     const n = Number(val);
@@ -988,6 +1000,7 @@ ipcMain.handle('cfg-set', (_e, key, val) => {
     islandPos: cfg.islandPos === 'bottom' ? 'bottom' : 'top',
     taskbar: !!cfg.taskbar,
     lyrPickSave: cfg.lyrPickSave !== false,
+    expWidth: Number(cfg.expWidth) || 0,
     version: app.getVersion(),
   };
 });

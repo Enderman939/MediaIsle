@@ -804,6 +804,11 @@
 
   // ---------------------------------------------------------------- 毛玻璃 / 双语字幕 / 字号
   api.onGlass((g) => document.body.classList.toggle('glass', !!g));
+  // 展开宽度: 0 = 自动(672), 其余为固定像素宽
+  api.onExpWidth((v) => {
+    const w = Number(v) > 0 ? Number(v) : 672;
+    island.style.setProperty('--exp-w', w + 'px');
+  });
   api.onBilingual((b) => {
     S.bilingual = !!b;
     // 行高结构可能变化, 强制重建歌词 DOM

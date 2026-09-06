@@ -53,7 +53,7 @@ body {
 #island[data-state="compact"]        { width: 238px; height: 37px;  border-radius: 18.5px; }
 #island[data-state="volume"]         { width: 238px; height: 37px;  border-radius: 18.5px; }
 #island[data-state="notify"]         { width: 320px; height: 54px;  border-radius: 27px; }
-#island[data-state="expanded"]       { width: 672px; height: 214px; border-radius: 30px; }
+#island[data-state="expanded"]       { width: var(--exp-w, 672px); height: 214px; border-radius: 30px; }
 #island[data-state="expanded-empty"],
 #island[data-state="favlist"]        { width: 406px; height: 214px; border-radius: 30px; }
 
