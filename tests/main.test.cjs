@@ -53,6 +53,26 @@ test('diagnostics preserve network failure vs no match and elapsed time', async 
   } finally { h.close(); }
 });
 
+test('netease search falls back to POST when GET is rejected with API 405', async () => {
+  const h = harness();
+  try {
+    h.sandbox.fetch = async (url, init = {}) => {
+      let body;
+      if (String(url).includes('/api/search/get/web') && init.method !== 'POST') body = JSON.stringify({ code: 405 });
+      else if (String(url).includes('song/lyric')) body = JSON.stringify({ lrc: { lyric: '[00:01.00]Line' }, tlyric: { lyric: '' } });
+      else body = JSON.stringify({ result: { songs: [{ id: 9, name: 'Song', artists: [{ name: 'A' }], duration: 1000 }] } });
+      return { ok: true, status: 200, json: async () => JSON.parse(body) };
+    };
+    h.s.cfg.lyrSources = ['netease'];
+    const r = await h.s.fetchLyrics({ title: 'Song', artist: '', duration: 1 });
+    assert.equal(r.lines.length, 1);
+    assert.equal(r.src, 'netease');
+    const row = h.s.diagnostics().sources.netease;
+    assert.equal(row.state, 'hit');
+    assert.equal(row.error, '');
+  } finally { h.close(); }
+});
+
 test('source race takes first valid result and reports cache without stale request status', async () => {
   const h = harness();
   try {

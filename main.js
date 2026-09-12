@@ -1389,6 +1389,25 @@ async function httpJson(url, headers, signal) {
   }
 }
 
+async function httpPostForm(url, form, headers, signal) {
+  const res = await fetch(url, { method: 'POST', signal, headers: { ...(headers || {}), 'Content-Type': 'application/x-www-form-urlencoded' }, body: form });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+// 网易云搜索: GET 被风控拒绝(如 code 405)时回退 POST 表单提交, POST 稳定可用。
+// 回退成功会清除诊断里 GET 阶段的失败记录, 避免误报。
+async function neteaseSearch(kw, headers, signal, limit = 5) {
+  const q = encodeURIComponent(kw);
+  try {
+    return await httpJson(`https://music.163.com/api/search/get/web?s=${q}&type=1&offset=0&limit=${limit}`, headers, signal);
+  } catch { }
+  const json = await httpPostForm('https://music.163.com/api/search/get/web/', `s=${q}&type=1&offset=0&limit=${limit}`, headers, signal);
+  const ctx = lyricContext.getStore();
+  if (ctx) ctx.error = '';
+  return json;
+}
+
 function withTimeout(promise, ms) {
   return new Promise((resolve) => {
     const t = setTimeout(() => resolve(null), ms);
@@ -1405,8 +1424,7 @@ async function srcNetease(query) {
   try {
     const h = { ...H_UA, 'Referer': 'https://music.163.com/' };
     const attempt = async (kw) => {
-      const q = encodeURIComponent(kw);
-      const sr = await httpJson(`https://music.163.com/api/search/get/web?s=${q}&type=1&offset=0&limit=5`, h, ac.signal);
+      const sr = await neteaseSearch(kw, h, ac.signal);
       const songs = (sr && sr.result && sr.result.songs) || [];
       const durOf = (s) => (s.duration && s.duration > 0) ? s.duration / 1000 : 0;
       const cands = rankCands(songs, title, artist, duration,
@@ -1888,7 +1906,7 @@ ipcMain.handle('lyr-candidates', async (_e, q) => {
     } catch { }
     // 网易云
     try {
-      const sr = await httpJson(`https://music.163.com/api/search/get/web?s=${kw}&type=1&offset=0&limit=3`, { ...H_UA, Referer: 'https://music.163.com/' }, ac.signal);
+      const sr = await neteaseSearch(decodeURIComponent(kw), { ...H_UA, Referer: 'https://music.163.com/' }, ac.signal, 3);
       for (const s of ((sr.result && sr.result.songs) || []).slice(0, 3)) {
         out.push({ src: 'netease', key: String(s.id), name: s.name, artist: (s.artists || []).map((a) => a.name).join('/'), dur: s.duration > 0 ? Math.round(s.duration / 1000) : 0 });
       }

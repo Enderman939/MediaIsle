@@ -24,7 +24,8 @@ let application;
   }
   assert.ok(settings, 'Settings window opened');
   settings.on('pageerror', (e) => errors.push(e.message));
-  await settings.waitForSelector('#appVer:has-text("1.2.0")');
+  const appVersion = require('../package.json').version.split('+')[0];
+  await settings.waitForSelector(`#appVer:has-text("${appVersion}")`);
   const getCfg = () => settings.evaluate(() => window.island.getCfg());
   await settings.locator('#swLowPower').check();
   await settings.waitForTimeout(200);
@@ -74,7 +75,7 @@ let application;
   if (process.env.MEDIAISLE_TEST_EXE) {
     await settings.locator('[data-page="general"]').click();
     assert.equal(await settings.locator('#updateNotice').isVisible(), true);
-    assert.match(await settings.locator('#updateNoticeTitle').innerText(), /1\.2\.0/);
+    assert.match(await settings.locator('#updateNoticeTitle').innerText(), new RegExp(appVersion.replace(/\./g, '\\.')));
     await settings.screenshot({ path: path.join(evidence, 'updated-settings.png') });
     await settings.locator('#btnDismissNotice').click();
     assert.equal(await settings.locator('#updateNotice').isVisible(), false);
