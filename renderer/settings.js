@@ -12,6 +12,9 @@
   const sleepSub = document.getElementById('sleepSub');
   const swTb = document.getElementById('swTb');
   const swPickSave = document.getElementById('swPickSave');
+  const swLowPower = document.getElementById('swLowPower');
+  const rngLyrOffset = document.getElementById('rngLyrOffset');
+  const rngLyrOffsetVal = document.getElementById('rngLyrOffsetVal');
   const rngLyr = document.getElementById('rngLyr');
   const rngLyrVal = document.getElementById('rngLyrVal');
   const rngDl = document.getElementById('rngDl');
@@ -35,7 +38,7 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
 
   // ---------------------------------------------------------------- 侧边导航
   const pages = document.querySelectorAll('.md3-page');
-  const navOrder = ['general', 'stats', 'mixer', 'logs'];
+  const navOrder = ['general', 'stats', 'diagnostics', 'logs'];
   let prevNav = 'general';
   document.querySelectorAll('.md3-nav-item').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -48,7 +51,7 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
       pages.forEach((pg) => pg.classList.toggle('active', pg.id === 'page-' + target));
       if (target === 'stats') refresh(true); // 页面显示后重绘图表(带生长动画)
       if (target === 'logs') loadLogs();
-      if (target === 'mixer') loadMixer();
+      window.dispatchEvent(new CustomEvent('settings-page', { detail: target }));
     });
   });
 
@@ -85,17 +88,20 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
     swAuto.checked = !!cfg.autostart;
     swFs.checked = cfg.fsHide !== false;
     swPickSave.checked = cfg.lyrPickSave !== false;
-    [swGlass, swDlyr, swBi, swAuto, swFs, swTb, swPickSave].forEach(syncSwitch);
+    swTb.checked = !!cfg.taskbar;
+    swLowPower.checked = !!cfg.lowPower;
+    [swGlass, swDlyr, swBi, swAuto, swFs, swTb, swPickSave, swLowPower].forEach(syncSwitch);
     selPos.value = cfg.islandPos === 'bottom' ? 'bottom' : 'top';
     syncSelLabel(selPos);
     selExpW.value = String(cfg.expWidth ?? 0);
     syncSelLabel(selExpW);
     syncSelLabel(selSleep);
-    lyrSources = (Array.isArray(cfg.lyrSources) && cfg.lyrSources.length) ? cfg.lyrSources.slice() : ['soda', 'netease', 'qq', 'kugou'];
+    lyrSources = Array.isArray(cfg.lyrSources) ? cfg.lyrSources.slice() : ['soda', 'netease', 'qq', 'kugou'];
     renderChips();
     selStrategy.value = cfg.lyrStrategy === 'quality' ? 'quality' : 'race';
     syncSelLabel(selStrategy);
     setRange(rngLyr, rngLyrVal, cfg.lyrSize || 12.5, (v) => v.toFixed(1));
+    setRange(rngLyrOffset, rngLyrOffsetVal, Number(cfg.lyrOffset) || 0, (v) => (v > 0 ? '+' : '') + v.toFixed(1) + ' 秒');
     setRange(rngDl, rngDlVal, cfg.dlyrSize || 32, (v) => v + ' px');
     setRange(rngDlSub, rngDlSubVal, cfg.dlyrSubSize || 17, (v) => v + ' px');
     if (cfg.version) document.getElementById('appVer').textContent = cfg.version;
@@ -142,10 +148,12 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
   bindSwitch(swFs, 'fsHide');
   bindSwitch(swTb, 'taskbar');
   bindSwitch(swPickSave, 'lyrPickSave');
+  bindSwitch(swLowPower, 'lowPower');
   bindSelect(selStrategy, 'lyrStrategy');
   bindSelect(selPos, 'islandPos');
   bindSelect(selExpW, 'expWidth');
   bindRange(rngLyr, rngLyrVal, 'lyrSize', (v) => v.toFixed(1));
+  bindRange(rngLyrOffset, rngLyrOffsetVal, 'lyrOffset', (v) => (v > 0 ? '+' : '') + v.toFixed(1) + ' 秒');
   bindRange(rngDl, rngDlVal, 'dlyrSize', (v) => v + ' px');
   bindRange(rngDlSub, rngDlSubVal, 'dlyrSubSize', (v) => v + ' px');
 
@@ -339,69 +347,7 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
     } catch { }
   });
 
-  // ---------------------------------------------------------------- 自动更新
-  const updProg = document.getElementById('updProg');
-  const updFill = document.getElementById('updFill');
-  const updTxt = document.getElementById('updTxt');
-  const mb = (n) => (n / 1048576).toFixed(1) + ' MB';
-  async function refreshUpdate(force) {
-    if (!api.updateGet) return;
-    try {
-      const st = await api.updateGet(force === true);
-      btnRecheck.disabled = !!st.busy;
-      if (!st.packaged) {
-        updTitle.textContent = '当前为源代码运行';
-        updSub.textContent = '开发模式不检查更新';
-        btnUpdate.hidden = true;
-        btnRecheck.hidden = true;
-        updProg.hidden = true;
-        return;
-      }
-      const fmt = (d) => (Date.parse(d) > 0 ? new Date(d).toLocaleString('zh-CN', { hour12: false }) : '未知');
-      const prog = st.prog || {};
-      if (st.stage === 'download') {
-        updTitle.textContent = '正在下载更新…';
-        updSub.textContent = '下载完成后自动解压并重启';
-        updProg.hidden = false;
-        updFill.style.width = (prog.percent || 0).toFixed(1) + '%';
-        updTxt.textContent = (prog.total ? mb(prog.received) + ' / ' + mb(prog.total) + ' · ' : mb(prog.received) + ' · ')
-          + (prog.percent || 0).toFixed(1) + '% · ' + mb(prog.speed || 0) + '/s';
-        btnUpdate.disabled = true; btnUpdate.hidden = false; return;
-      }
-      updProg.hidden = true;
-      if (st.stage === 'extract') { updTitle.textContent = '正在解压更新…'; updSub.textContent = '请稍候'; btnUpdate.disabled = true; btnUpdate.hidden = false; return; }
-      if (st.stage === 'restart') { updTitle.textContent = '即将重启完成更新…'; btnUpdate.disabled = true; btnUpdate.hidden = false; return; }
-      if (st.stage === 'error') {
-        updTitle.textContent = '更新失败';
-        updSub.textContent = st.message || '发生未知错误';
-        btnUpdate.hidden = false; btnUpdate.disabled = false; btnUpdate.textContent = '重试';
-        return;
-      }
-      btnUpdate.textContent = '立即更新';
-      updProg.hidden = true;
-      if (st.available) {
-        updTitle.textContent = '发现新版本' + (st.available.version ? ' (v' + st.available.version + ')' : '');
-        updSub.textContent = '新构建 ' + fmt(st.available.buildDate) + ' · 当前构建 ' + fmt(st.localBuildDate);
-        btnUpdate.hidden = false; btnUpdate.disabled = false;
-      } else {
-        updTitle.textContent = '已是最新版本';
-        updSub.textContent = '当前构建 ' + fmt(st.localBuildDate);
-        btnUpdate.hidden = true;
-      }
-    } catch { }
-  }
-  if (api.onUpdateStatus) api.onUpdateStatus(() => refreshUpdate());
-  const btnRecheck = document.getElementById('btnRecheck');
-  if (btnRecheck) btnRecheck.addEventListener('click', async () => {
-    btnRecheck.disabled = true;
-    updTitle.textContent = '正在检查更新…';
-    updSub.textContent = '';
-    try { await api.updateGet(true); } catch { }
-    btnRecheck.disabled = false;
-    await refreshUpdate(true);
-  });
-  if (btnUpdate) btnUpdate.addEventListener('click', async () => { btnUpdate.disabled = true; try { await api.updateApply(); } catch { } refreshUpdate(); });
-  refreshUpdate(true);
+  // Update and diagnostics workflows live in settings-tools.js.
 
   // ---------------------------------------------------------------- 工具
   // MD3 令牌读取 (图表绘制需要具体色值, 从 CSS 令牌解析)

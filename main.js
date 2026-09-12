@@ -5,12 +5,19 @@
 //  - 默认鼠标穿透, 悬停岛内时恢复交互
 //  - 通过 PowerShell 桥接(bridge.ps1)读取/控制系统媒体(SMTC)
 // =====================================================================
-const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage, net, dialog } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage, net, dialog, globalShortcut } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const zlib = require('zlib');
+const { AsyncLocalStorage } = require('async_hooks');
+const { parseRelease, isNewer, resolveNotice } = require('./lib/release');
+const { DEFAULT_SHORTCUTS, trackKey, clampOffset, effectiveOffset, normalizeShortcut } = require('./lib/preferences');
+const releaseNotes = require('./release-notes.json');
+
+// Isolated user data for local verification; normal launches use Electron's default path.
+if (process.env.MEDIAISLE_USER_DATA) app.setPath('userData', path.resolve(process.env.MEDIAISLE_USER_DATA));
 
 // ---------------------------------------------------------------- 更名数据迁移
 // 应用由 FastMusic Island 更名 MediaIsle, userData 目录随名变化,
@@ -36,12 +43,12 @@ try {
 } catch { }
 
 // 窗口尺寸: 容纳展开态(含右侧歌词竖栏)灵动岛 + 少量余量(动画/阴影)
-const WIN_W = 710;
+let WIN_W = 710;
 const WIN_H = 258;
 const WIN_TOP_GAP = 8; // 距屏幕顶部间距
 
 // 命令文件: 主进程 -> PS 桥接的单向命令通道(PS 5.1 无法非阻塞读 stdin)
-const CMD_FILE = path.join(os.tmpdir(), 'fastmusic-island-cmd.json');
+const CMD_FILE = path.join(process.env.MEDIAISLE_USER_DATA ? app.getPath('userData') : os.tmpdir(), 'fastmusic-island-cmd.json');
 const CMD_TMP = CMD_FILE + '.tmp';
 
 // ---------------------------------------------------------------- 错误日志
@@ -89,7 +96,8 @@ ipcMain.on('log-clear', () => { logBuf.length = 0; });
 
 // 配置持久化(毛玻璃/桌面歌词)
 const CFG_FILE = path.join(app.getPath('userData'), 'config.json');
-let cfg = { glass: false, dlyr: false, fsHide: true, bilingual: true, lyrSize: 12.5, dlyrSize: 32, dlyrSubSize: 17, islandPos: 'top', taskbar: false, lyrPickSave: true, expWidth: 0, lyrSources: ['soda', 'netease', 'qq', 'kugou'], lyrStrategy: 'race' };
+const existingInstall = fs.existsSync(CFG_FILE);
+let cfg = { glass: false, dlyr: false, fsHide: true, bilingual: true, lyrSize: 12.5, dlyrSize: 32, dlyrSubSize: 17, lyrOffset: 0, lyrOffsets: {}, shortcuts: { ...DEFAULT_SHORTCUTS }, lowPower: false, islandPos: 'top', taskbar: false, lyrPickSave: true, expWidth: 0, lyrSources: ['soda', 'netease', 'qq', 'kugou'], lyrStrategy: 'race' };
 try {
   const raw = fs.readFileSync(CFG_FILE, 'utf8').replace(/^\uFEFF/, '');
   Object.assign(cfg, JSON.parse(raw));
@@ -199,6 +207,13 @@ let bridge = null;
 let bridgeRestartCount = 0;
 let bridgeLastStart = 0;
 let artCache = { hash: null, data: null };
+let lastMediaState = null;
+let lastBridgeError = '';
+let bridgeReady = false;
+const lyricContext = new AsyncLocalStorage();
+let lyricRun = 0;
+let lyricDiagnostic = { key: '', title: '', artist: '', selected: '', cache: false, sources: {} };
+const shortcutStatus = {};
 let tray = null;
 let hiddenByUser = false;
 let hiddenByFs = false;
@@ -212,6 +227,11 @@ function send(ch, ...args) {
 function positionWindow() {
   if (!win) return;
   const { workArea } = screen.getPrimaryDisplay();
+  const requested = Number(cfg.expWidth) || 672;
+  const expandedWidth = Math.min(Math.max(560, requested), Math.max(280, workArea.width - 38));
+  WIN_W = Math.min(workArea.width, expandedWidth + 38);
+  if (win.getSize()[0] !== WIN_W) win.setSize(WIN_W, WIN_H, false);
+  send('exp-width-changed', expandedWidth);
   const y = cfg.islandPos === 'bottom'
     ? workArea.y + workArea.height - WIN_H - 8
     : workArea.y + WIN_TOP_GAP;
@@ -260,7 +280,9 @@ function createWindow() {
     send('glass-changed', !!cfg.glass);
     send('bilingual-changed', cfg.bilingual !== false);
     send('lyr-size-changed', cfg.lyrSize || 12.5);
-    send('exp-width-changed', Number(cfg.expWidth) || 0);
+    positionWindow();
+    sendCurrentOffset();
+    send('perf-mode-changed', !!cfg.lowPower);
   });
 
   // 调试: 转发渲染层 console 输出 (error/warning 级别同时写入 error.log)
@@ -277,6 +299,8 @@ function createWindow() {
 
 // ---------------------------------------------------------------- 桥接
 function startBridge() {
+  if (bridge || app.isQuitting) return;
+  bridgeReady = false;
   bridgeLastStart = Date.now();
   // 打包后 bridge.ps1 位于 asar 解包目录(PowerShell 子进程无法读取 asar 内部)
   let bridgePath = path.join(__dirname, 'bridge.ps1');
@@ -310,8 +334,11 @@ function startBridge() {
   bridge.stderr.setEncoding('utf8');
   bridge.stderr.on('data', (d) => logErr('[bridge:stderr]', String(d).trim()));
 
+  bridge.on('error', (err) => { bridgeReady = false; lastBridgeError = err.message; logErr('[bridge:spawn]', err); });
+
   bridge.on('exit', (code) => {
     bridge = null;
+    bridgeReady = false;
     const ranMs = Date.now() - bridgeLastStart;
     if (ranMs > 60000) bridgeRestartCount = 0; // 稳定运行过则重置计数
     if (bridgeRestartCount < 5) {
@@ -327,6 +354,8 @@ function startBridge() {
 function handleBridgeLine(msg) {
   if (!win || win.isDestroyed()) return;
   if (msg.type === 'ready') {
+    bridgeReady = true;
+    lastBridgeError = '';
     console.log('[bridge] ready');
   } else if (msg.type === 'state') {
     // 封面缓存: bridge 只在封面变化帧附带 art, 此处补全其余帧
@@ -336,11 +365,16 @@ function handleBridgeLine(msg) {
       msg.art = artCache.data;
     }
     if (!msg.hasSession) artCache = { hash: null, data: null };
+    const changedTrack = !lastMediaState || lastMediaState.title !== msg.title || lastMediaState.artist !== msg.artist;
+    const { art, ...metadata } = msg;
+    lastMediaState = { ...metadata, receivedAt: Date.now() };
+    if (changedTrack) sendCurrentOffset();
+    if (msg.status && msg.status !== lastBridgeStatus) { lastBridgeStatus = msg.status; updateThumbar(); }
     bumpStats(msg);
     win.webContents.send('media-state', msg);
   } else if (msg.type === 'error') {
     logErr('[bridge]', msg.message);
-    if (msg.status && msg.status !== lastBridgeStatus) { lastBridgeStatus = msg.status; updateThumbar(); }
+    lastBridgeError = String(msg.message || '');
   } else if (msg.type === 'volume') {
     send('volume-changed', msg);
   } else if (msg.type === 'fs') {
@@ -399,7 +433,7 @@ let islandDragging = false;
 function islandScreenRect() {
   const s = ISLAND_RECTS[islandState] || ISLAND_RECTS.idle;
   // 展开态宽度可由设置调整 (cfg.expWidth, 0 = 自动 672)
-  const w = islandState === 'expanded' ? (Number(cfg.expWidth) > 0 ? Number(cfg.expWidth) : 672) : s.w;
+  const w = islandState === 'expanded' ? WIN_W - 38 : s.w;
   const [wx, wy] = win.getPosition();
   return {
     x: Math.round(wx + (WIN_W - w) / 2),
@@ -474,6 +508,26 @@ let updateStage = '';       // '' | 'download' | 'extract' | 'restart' | 'error'
 let updateBusy = false;
 let updateLastCheck = 0;
 let updateProg = { received: 0, total: 0, percent: 0, speed: 0 };
+let updateMessage = '';
+let updateCheckPromise = null;
+const UPDATE_NOTICE_FILE = path.join(app.getPath('userData'), 'update-notice.json');
+const UPDATE_RESULT_FILE = path.join(app.getPath('userData'), 'update-result.json');
+let updateNotice = null;
+let pendingUpdate = null;
+try {
+  pendingUpdate = JSON.parse(fs.readFileSync(UPDATE_NOTICE_FILE, 'utf8').replace(/^\uFEFF/, ''));
+} catch { }
+if (app.isPackaged) {
+  updateNotice = resolveNotice({ pending: pendingUpdate, version: app.getVersion(), previous: cfg.lastSeenVersion,
+    existingInstall, notes: releaseNotes.changes });
+  cfg.lastSeenVersion = app.getVersion();
+  saveCfg();
+  if (updateNotice) fs.writeFileSync(UPDATE_NOTICE_FILE, JSON.stringify(updateNotice));
+  try {
+    const result = JSON.parse(fs.readFileSync(UPDATE_RESULT_FILE, 'utf8').replace(/^\uFEFF/, ''));
+    if (result.status === 'error') { updateStage = 'error'; updateMessage = result.message; }
+  } catch { }
+}
 
 function send2(ch, ...args) {
   send(ch, ...args);
@@ -482,26 +536,33 @@ function send2(ch, ...args) {
 
 async function checkForUpdate() {
   if (!app.isPackaged || !localBuildDate) return null;
-  try {
     // net.fetch: Chromium 网络栈, 走系统代理与系统证书 (直连 fetch 在代理/拦截环境下不可用)
     const res = await net.fetch('https://github.com/' + REPO + '/releases/latest/download/latest.json', { signal: AbortSignal.timeout(10000) });
-    if (!res.ok) return null;
-    const info = await res.json();
-    const remote = Date.parse(info.buildDate || '');
-    const local = Date.parse(localBuildDate);
-    if (!(remote > 0) || !(local > 0)) return null;
-    // 容忍 60s 时钟偏差
-    if (remote - local > 60e3) return { version: info.version || '', buildDate: info.buildDate, zip: info.zip || '', sha256: info.sha256 || '' };
-  } catch { }
-  return null;
+    if (!res.ok) throw new Error('检查更新失败: HTTP ' + res.status);
+    const info = parseRelease(await res.json());
+    return isNewer(info, app.getVersion(), localBuildDate) ? info : null;
 }
 
 async function runUpdateCheck(force) {
   if (!app.isPackaged || !localBuildDate || updateBusy) return updateAvail;
+  if (updateCheckPromise) return updateCheckPromise;
   const now = Date.now();
   if (!force && now - updateLastCheck < 10 * 60e3) return updateAvail;
   updateLastCheck = now;
-  updateAvail = await checkForUpdate();
+  updateStage = 'checking';
+  updateMessage = '';
+  send2('update-status', { stage: updateStage });
+  updateCheckPromise = checkForUpdate();
+  try {
+    updateAvail = await updateCheckPromise;
+    updateStage = '';
+  } catch (error) {
+    updateStage = 'check-error';
+    updateMessage = error.message;
+  } finally {
+    updateCheckPromise = null;
+    send2('update-status', { stage: updateStage, message: updateMessage });
+  }
   if (updateAvail) {
     try { tray.displayBalloon({ title: 'MediaIsle', content: '发现新版本 (构建于 ' + updateAvail.buildDate.slice(0, 10) + ')，可在设置中更新' }); } catch { }
   }
@@ -622,7 +683,7 @@ async function downloadOne(url) {
   let total = 0;
   let ranges = false;
   try {
-    const head = await net.fetch(url, { method: 'HEAD' });
+    const head = await net.fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(8000) });
     total = Number(head.headers.get("content-length")) || 0;
     ranges = (head.headers.get('accept-ranges') || '').toLowerCase().includes('bytes');
   } catch { }
@@ -647,6 +708,8 @@ async function downloadUpdate(candidates, sha256) {
   for (const url of candidates) {
     try {
       const data = await downloadOne(url);
+      updateStage = 'verify';
+      send2('update-status', { stage: updateStage });
       if (sha256) {
         const hash = require('crypto').createHash('sha256').update(data).digest('hex');
         if (hash !== sha256) throw new Error('SHA256 校验失败(下载不完整或被篡改)');
@@ -667,10 +730,12 @@ async function applyUpdate() {
   const avail = updateAvail || await runUpdateCheck(true);
   if (!avail || !avail.zip) return false;
   updateBusy = true;
+  updateMessage = '';
   try {
     const dir = path.join(app.getPath('userData'), 'update');
     fs.rmSync(dir, { recursive: true, force: true });
     fs.mkdirSync(dir, { recursive: true });
+    fs.rmSync(UPDATE_RESULT_FILE, { force: true });
     const zipPath = path.join(dir, 'update.zip');
 
     updateStage = 'download';
@@ -691,37 +756,38 @@ async function applyUpdate() {
     send2('update-status', { stage: updateStage });
     const newDir = path.join(dir, 'new');
     await new Promise((resolve, reject) => {
-      const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
-        'Expand-Archive -LiteralPath "' + zipPath + '" -DestinationPath "' + newDir + '" -Force'], { windowsHide: true });
+      const literal = (s) => "'" + s.replace(/'/g, "''") + "'";
+      const script = "$ErrorActionPreference = 'Stop'; Expand-Archive -LiteralPath " + literal(zipPath) + ' -DestinationPath ' + literal(newDir) + ' -Force';
+      const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand',
+        Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true });
       ps.on('exit', (c) => (c === 0 ? resolve() : reject(new Error('解压失败 (exit ' + c + ')'))));
       ps.on('error', reject);
     });
 
-    // 生成换文件脚本: 等进程退出 -> 覆盖安装目录 -> 重启 (分离执行, 独立于本进程存活)
-    updateStage = 'restart';
-    send2('update-status', { stage: updateStage });
     const exeName = path.basename(app.getPath('exe'));
     const installDir = path.dirname(app.getPath('exe'));
-    const cmdPath = path.join(dir, 'update.cmd');
-    const cmd = [
-      '@echo off',
-      // ping 延时: timeout 在无控制台的分离进程里会因输入重定向失败
-      'ping -n 3 127.0.0.1 >nul',
-      'taskkill /f /im ' + exeName + ' >nul 2>&1',
-      'xcopy /e /y /i "' + newDir + '\\*" "' + installDir + '" >nul',
-      'rmdir /s /q "' + newDir + '"',
-      'del /q "' + zipPath + '"',
-      'start "" "' + path.join(installDir, exeName) + '"',
-      '(goto) 2>nul & del "%~f0"',
-    ].join('\r\n');
-    fs.writeFileSync(cmdPath, cmd);
-    const child = spawn('cmd.exe', ['/c', cmdPath], { detached: true, stdio: 'ignore', windowsHide: true });
+    if (!fs.existsSync(path.join(newDir, exeName)) || !fs.existsSync(path.join(newDir, 'resources', 'app.asar'))) throw new Error('更新包缺少应用文件');
+    fs.writeFileSync(UPDATE_NOTICE_FILE, JSON.stringify({ from: app.getVersion(), to: avail.version,
+      buildDate: avail.buildDate, notes: avail.notes, createdAt: new Date().toISOString() }));
+    const installer = path.join(dir, 'install.ps1');
+    fs.copyFileSync(path.join(__dirname, 'scripts', 'install-update.ps1'), installer);
+    const planPath = path.join(dir, 'plan.json');
+    fs.writeFileSync(planPath, JSON.stringify({ pid: process.pid, installDir, newDir, exeName,
+      to: avail.version, resultFile: UPDATE_RESULT_FILE,
+      ui: { waiting: '正在等待 MediaIsle 退出…', installing: '正在安装更新…', restarting: '正在恢复设置页面…', done: '更新完成', failed: '更新失败，正在恢复原版本。' },
+    }));
+    const child = spawn('powershell.exe', ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', installer, '-PlanPath', planPath],
+      { detached: true, stdio: 'ignore', windowsHide: true });
+    await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
     child.unref();
+    updateStage = 'restart';
+    send2('update-status', { stage: updateStage });
     setTimeout(() => app.quit(), 800);
     return true;
   } catch (e) {
     updateStage = 'error';
-    send2('update-status', { stage: 'error', message: (e && e.message) || String(e) });
+    updateMessage = e.message || String(e);
+    send2('update-status', { stage: 'error', message: updateMessage });
     updateBusy = false;
     return false;
   }
@@ -754,10 +820,109 @@ function updateThumbar() {
 }
 
 ipcMain.handle('update-get', async (_e, force) => {
-  if (app.isPackaged && localBuildDate) await runUpdateCheck(force === true);
-  return { packaged: !!app.isPackaged, localBuildDate, available: updateAvail, stage: updateStage, busy: updateBusy, prog: updateProg };
+  if (force === true && app.isPackaged && localBuildDate) await runUpdateCheck(true);
+  return { packaged: !!app.isPackaged, version: app.getVersion(), localBuildDate, available: updateAvail, stage: updateStage,
+    busy: updateBusy, message: updateMessage, prog: updateProg, notes: releaseNotes };
 });
 ipcMain.handle('update-apply', () => applyUpdate());
+ipcMain.handle('update-notice-get', () => updateNotice);
+ipcMain.handle('update-notice-ack', () => {
+  updateNotice = null;
+  try { fs.rmSync(UPDATE_NOTICE_FILE, { force: true }); } catch { }
+  return true;
+});
+
+// ---------------------------------------------------------------- 诊断 / 快捷键
+ipcMain.handle('diagnostics-get', () => ({
+  bridge: {
+    connected: !!bridge && bridgeReady,
+    status: lastBridgeStatus || '',
+    error: lastBridgeError || '',
+    restarts: bridgeRestartCount,
+  },
+  media: lastMediaState ? {
+    hasSession: !!lastMediaState.hasSession,
+    appId: lastMediaState.appId || '',
+    title: lastMediaState.title || '',
+    artist: lastMediaState.artist || '',
+    source: lastMediaState.source || '',
+    status: lastMediaState.status || '',
+    duration: lastMediaState.duration || 0,
+    position: lastMediaState.position || 0,
+    canPlay: !!lastMediaState.canPlay,
+    canPause: !!lastMediaState.canPause,
+    canNext: !!lastMediaState.canNext,
+    canPrev: !!lastMediaState.canPrev,
+    canSeek: !!lastMediaState.canSeek,
+    receivedAt: lastMediaState.receivedAt || 0,
+  } : null,
+  lyric: {
+    enabled: Array.isArray(cfg.lyrSources) ? cfg.lyrSources.slice() : [],
+    strategy: cfg.lyrStrategy === 'quality' ? 'quality' : 'race',
+    offset: effectiveOffset(cfg, lastMediaState?.title, lastMediaState?.artist),
+    globalOffset: Number(cfg.lyrOffset) || 0,
+    savedOffset: cfg.lyrOffsets?.[trackKey(lastMediaState?.title, lastMediaState?.artist)] ?? null,
+    request: JSON.parse(JSON.stringify(lyricDiagnostic)),
+  },
+  shortcuts: { ...shortcutStatus },
+}));
+
+ipcMain.handle('diagnostics-retry', () => { lyrCache.clear(); send('lyrics-refetch'); return true; });
+ipcMain.handle('bridge-reconnect', () => {
+  bridgeRestartCount = 0;
+  if (bridge) bridge.kill();
+  else startBridge();
+  return true;
+});
+
+function sendCurrentOffset() {
+  const m = lastMediaState || {};
+  send('lyr-offset-changed', { value: effectiveOffset(cfg, m.title, m.artist), title: m.title || '', artist: m.artist || '' });
+}
+
+ipcMain.handle('track-offset-set', (_e, q) => {
+  if (!q || !q.title) throw new Error('当前没有曲目');
+  cfg.lyrOffsets = cfg.lyrOffsets && typeof cfg.lyrOffsets === 'object' ? cfg.lyrOffsets : {};
+  const key = trackKey(q.title, q.artist);
+  if (q.value === null) delete cfg.lyrOffsets[key];
+  else cfg.lyrOffsets[key] = clampOffset(q.value);
+  saveCfg();
+  sendCurrentOffset();
+  return true;
+});
+
+function sendHotkey(action) {
+  try { if (win && !win.isDestroyed()) win.webContents.send('hotkey-action', action); } catch { }
+}
+
+function registerGlobalShortcuts() {
+  globalShortcut.unregisterAll();
+  for (const action of Object.keys(DEFAULT_SHORTCUTS)) {
+    const accelerator = cfg.shortcuts?.[action] ?? DEFAULT_SHORTCUTS[action];
+    let registered = false;
+    try { registered = !!accelerator && globalShortcut.register(accelerator, () => sendHotkey(action)); }
+    catch (e) { logErr('[shortcut]', accelerator, e); }
+    shortcutStatus[action] = { accelerator, registered, state: !accelerator ? 'disabled' : registered ? 'registered' : 'conflict' };
+  }
+}
+
+ipcMain.handle('shortcut-set', (_e, action, value) => {
+  if (!Object.hasOwn(DEFAULT_SHORTCUTS, action)) return { ok: false, message: '未知操作' };
+  try {
+    const accelerator = normalizeShortcut(value);
+    const old = { ...DEFAULT_SHORTCUTS, ...cfg.shortcuts };
+    if (accelerator && Object.entries(old).some(([k, v]) => k !== action && normalizeShortcut(v) === accelerator)) throw new Error('快捷键与其他操作重复');
+    cfg.shortcuts = { ...old, [action]: accelerator };
+    registerGlobalShortcuts();
+    if (accelerator && !shortcutStatus[action].registered) {
+      cfg.shortcuts = old;
+      registerGlobalShortcuts();
+      throw new Error('快捷键已被其他应用占用');
+    }
+    saveCfg();
+    return { ok: true, shortcuts: { ...shortcutStatus } };
+  } catch (e) { return { ok: false, message: e.message }; }
+});
 
 // ---------------------------------------------------------------- 备份导入/导出 + 定时停止
 ipcMain.handle('backup-export', async (_e, favs) => {
@@ -805,7 +970,10 @@ ipcMain.handle('backup-import', async (_e, favs) => {
       send('glass-changed', !!cfg.glass);
       send('bilingual-changed', cfg.bilingual !== false);
       send('lyr-size-changed', cfg.lyrSize || 12.5);
-      send('exp-width-changed', Number(cfg.expWidth) || 0);
+      positionWindow();
+      sendCurrentOffset();
+      registerGlobalShortcuts();
+      send('perf-mode-changed', !!cfg.lowPower);
       try { if (win && !win.isDestroyed()) win.setSkipTaskbar(!cfg.taskbar); } catch { }
       try { if (dlWin && !dlWin.isDestroyed()) dlWin.webContents.send('dl-style', { size: cfg.dlyrSize || 32, subSize: cfg.dlyrSubSize || 17 }); } catch { }
       if (cfg.dlyr) ensureDlyrics(); else closeDlyrics();
@@ -865,6 +1033,8 @@ function createSettingsWindow() {
       spellcheck: false,
     },
   });
+  try { setWin.setAlwaysOnTop(true, 'screen-saver'); } catch { }
+  try { setWin.setVisibleOnAllWorkspaces(true); } catch { }
   setWin.loadFile(path.join(__dirname, 'renderer', 'settings.html'));
   attachConsoleForward(setWin, 'settings');
   setWin.on('closed', () => { setWin = null; });
@@ -889,6 +1059,8 @@ ipcMain.handle('cfg-get', () => ({
   lyrSize: cfg.lyrSize || 12.5,
   dlyrSize: cfg.dlyrSize || 32,
   dlyrSubSize: cfg.dlyrSubSize || 17,
+  lyrOffset: Number(cfg.lyrOffset) || 0,
+  lowPower: !!cfg.lowPower,
   islandPos: cfg.islandPos === 'bottom' ? 'bottom' : 'top',
   taskbar: !!cfg.taskbar,
   lyrPickSave: cfg.lyrPickSave !== false,
@@ -939,8 +1111,19 @@ ipcMain.handle('cfg-set', (_e, key, val) => {
     if (n === 0 || (isFinite(n) && n >= 420 && n <= 1280)) {
       cfg.expWidth = n;
       saveCfg();
-      send('exp-width-changed', n);
+      positionWindow();
     }
+  } else if (key === 'lyrOffset') {
+    const n = Number(val);
+    if (isFinite(n) && n >= -10 && n <= 10) {
+      cfg.lyrOffset = Math.round(n * 10) / 10;
+      saveCfg();
+      sendCurrentOffset();
+    }
+  } else if (key === 'lowPower') {
+    cfg.lowPower = !!val;
+    saveCfg();
+    send('perf-mode-changed', cfg.lowPower);
   } else if (key === 'dlyrSize') {
     const n = Number(val);
     if (isFinite(n) && n >= 18 && n <= 56) {
@@ -997,6 +1180,8 @@ ipcMain.handle('cfg-set', (_e, key, val) => {
     lyrSize: cfg.lyrSize || 12.5,
     dlyrSize: cfg.dlyrSize || 32,
     dlyrSubSize: cfg.dlyrSubSize || 17,
+    lyrOffset: Number(cfg.lyrOffset) || 0,
+    lowPower: !!cfg.lowPower,
     islandPos: cfg.islandPos === 'bottom' ? 'bottom' : 'top',
     taskbar: !!cfg.taskbar,
     lyrPickSave: cfg.lyrPickSave !== false,
@@ -1191,9 +1376,17 @@ function rankCands(rawList, title, artist, duration, nameOf, artistOf, durOf) {
 }
 
 async function httpJson(url, headers, signal) {
-  const res = await fetch(url, { signal, headers: headers || {} });
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  return res.json();
+  try {
+    const res = await fetch(url, { signal, headers: headers || {} });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const json = await res.json();
+    if (Number(json?.code) >= 400) throw new Error('API ' + json.code);
+    return json;
+  } catch (error) {
+    const ctx = lyricContext.getStore();
+    if (ctx) ctx.error = `${new URL(url).hostname}: ${error.name === 'AbortError' ? '请求超时' : error.message}`;
+    throw error;
+  }
 }
 
 function withTimeout(promise, ms) {
@@ -1474,24 +1667,50 @@ const LYRIC_SOURCES = [
   { id: 'kugou', fn: srcKugou },
 ];
 
+async function measuredSource(source, query, runId, relaxed = false) {
+  const startedAt = Date.now();
+  const context = { error: '' };
+  const row = { state: 'loading', startedAt, elapsedMs: 0, lines: 0, error: '', relaxed };
+  if (lyricRun === runId) lyricDiagnostic.sources[source.id] = row;
+  const timeout = Symbol('timeout');
+  let timer;
+  let result;
+  try {
+    result = await Promise.race([
+      lyricContext.run(context, () => Promise.resolve().then(() => source.fn(query))),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(timeout), 9000); }),
+    ]);
+    row.lines = result === timeout ? 0 : result?.lines?.length || 0;
+    row.state = result === timeout ? 'timeout' : row.lines ? 'hit' : context.error ? 'error' : 'empty';
+  } catch (error) {
+    context.error = error.message;
+    row.state = 'error';
+  } finally {
+    clearTimeout(timer);
+    row.elapsedMs = Date.now() - startedAt;
+    row.error = context.error;
+  }
+  return result === timeout ? null : result;
+}
+
 async function fetchLyrics(query) {
   const { title, artist, duration } = query || {};
   if (!title) return { lines: [], src: '', dur: 0 };
   const key = (title + '|' + artist).toLowerCase();
-  if (lyrCache.has(key)) return lyrCache.get(key);
-
-  // 用户手动选定的歌词优先 (可在设置中关闭保存)
-  const pick = cfg.lyrPickSave !== false ? lyrPicks[key] : undefined;
-  if (pick) {
-    try {
-      const r = await fetchLyricByKey(pick.src, pick.key);
-      if (r && r.lines && r.lines.length) return finish(r.lines, pick.src + ' · 手动', r.dur, r.trans);
-    } catch { }
+  const runId = ++lyricRun;
+  lyricDiagnostic = { key, title, artist: artist || '', selected: '', cache: false, sources: {} };
+  if (lyrCache.has(key)) {
+    const cached = lyrCache.get(key);
+    lyricDiagnostic.selected = cached.src;
+    lyricDiagnostic.cache = true;
+    return cached;
   }
+  const strat = cfg.lyrStrategy === 'quality' ? 'quality' : 'race';
 
   const finish = (lines, src, dur, trans) => {
     const r = { lines: lines || [], src: src || '', dur: dur || 0, trans: trans || [] };
     lyrCache.set(key, r);
+    if (runId === lyricRun) lyricDiagnostic.selected = src || '';
     if (lines && lines.length) {
       // 日志 ASCII 转义: 终端代码页不一致时也不会显示乱码
       const safe = String(title).replace(/[^\x20-\x7E]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
@@ -1500,13 +1719,20 @@ async function fetchLyrics(query) {
     return r;
   };
 
+  const pick = cfg.lyrPickSave !== false ? lyrPicks[key] : undefined;
+  if (pick) {
+    try {
+      const r = await fetchLyricByKey(pick.src, pick.key);
+      if (r?.lines?.length) return finish(r.lines, pick.src + ' · 手动', r.dur, r.trans);
+    } catch (error) { logErr('[lyrics:pick]', error.message); }
+  }
+
   // 按用户启用的音源并发 (固定优先级: 汽水 > 网易 > QQ > 酷狗)
   const enabled = LYRIC_SOURCES.filter((s) => Array.isArray(cfg.lyrSources) && cfg.lyrSources.includes(s.id));
   if (!enabled.length) return finish([], '', 0, []);
-  const strat = cfg.lyrStrategy === 'quality' ? 'quality' : 'race';
 
   const ps = enabled.map((s) =>
-    withTimeout(Promise.resolve().then(() => s.fn({ title, artist, duration })), 9000)
+    measuredSource(s, { title, artist, duration }, runId)
       .then((r) => r ? {
         lines: (r.lines && r.lines.length) ? r.lines : [],
         src: (r.lines && r.lines.length) ? s.id : '',
@@ -1552,7 +1778,7 @@ async function fetchLyrics(query) {
   if (!mainResult.lines.length && artist) {
     for (const s of enabled) {
       try {
-        const r = await withTimeout(Promise.resolve().then(() => s.fn({ title, artist: '', duration })), 9000)
+        const r = await measuredSource(s, { title, artist: '', duration }, runId, true)
           .then((r) => r ? {
             lines: (r.lines && r.lines.length) ? r.lines : [],
             src: (r.lines && r.lines.length) ? s.id : '',
@@ -1783,20 +2009,23 @@ function createTray() {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => { /* 已在运行, 忽略 */ });
+  app.on('second-instance', () => createSettingsWindow());
 
   app.whenReady().then(() => {
     // 清理上次运行遗留的命令文件; 错误日志超 256KB 轮转
     try { fs.rmSync(CMD_FILE, { force: true }); fs.rmSync(CMD_TMP, { force: true }); } catch { }
     try { if (fs.statSync(LOG_FILE).size > 262144) fs.rmSync(LOG_FILE, { force: true }); } catch { }
     createWindow();
-    startBridge();
+    if (process.env.MEDIAISLE_NO_BRIDGE !== '1') startBridge();
     createTray();
+    registerGlobalShortcuts();
     if (cfg.dlyr) ensureDlyrics();
     screen.on('display-metrics-changed', positionDlyrics);
     console.log('[start] MediaIsle', app.getVersion(), '| build:', localBuildDate || '(源代码)');
     // 调试: MEDIAISLE_SETTINGS=1 启动时直接打开设置窗口
-    if (process.env.MEDIAISLE_SETTINGS === '1') createSettingsWindow();
+    if (process.env.MEDIAISLE_SETTINGS === '1' || process.argv.includes('--settings') || process.argv.includes('--updated')) createSettingsWindow();
+    // 更新重启后自动恢复设置页, 由设置页消费 update-notice 并展示版本变更
+    if (updateNotice) setTimeout(() => createSettingsWindow(), 700);
     // 打包版: 启动 30s 后后台检查更新
     if (app.isPackaged && localBuildDate) {
       setTimeout(() => runUpdateCheck(false).catch(() => { }), 30e3);
@@ -1810,6 +2039,10 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('before-quit', () => {
     app.isQuitting = true;
+    clearTimeout(cfgTimer);
+    try { fs.writeFileSync(CFG_FILE, JSON.stringify(cfg)); } catch { }
+    if (statsDirty) { try { fs.writeFileSync(STATS_FILE, JSON.stringify(stats)); } catch { } }
+    try { globalShortcut.unregisterAll(); } catch { }
   });
 
   app.on('will-quit', () => {

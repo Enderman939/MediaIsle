@@ -39,7 +39,7 @@
     volume: 50, mute: false,
     sources: [], selApp: '',
     lyrics: null, lyricKey: '',
-    trans: [], bilingual: true, lyrSize: 12.5,
+    trans: [], bilingual: true, lyrSize: 12.5, lyrOffset: 0, lowPower: false,
     art: null,
     updatedAt: 0,
     seekGraceUntil: 0,   // seek 后的桥接帧宽限期(防视觉回跳)
@@ -469,11 +469,16 @@
   }
   function applyPctForce(pct) { uiPct = -1; applyPct(pct); }
 
+  function scheduleTick() {
+    if (S.lowPower) setTimeout(() => requestAnimationFrame(tick), 100);
+    else requestAnimationFrame(tick);
+  }
+
   function tick() {
     const now = performance.now();
 
     // 窗口被遮挡/最小化时跳过全部 UI 工作
-    if (document.hidden) { lastTickTs = now; requestAnimationFrame(tick); return; }
+    if (document.hidden) { lastTickTs = now; scheduleTick(); return; }
 
     // 音量胶囊/通知气泡超时自动收回 (音量优先级更高)
     if (!hovered) {
@@ -497,7 +502,7 @@
     updateLyricUI(now);
 
     updateProgressUI();
-    requestAnimationFrame(tick);
+    scheduleTick();
   }
 
   // 多行滚动歌词: 虚拟窗口渲染(仅当前行±7), 仅换行时触碰 DOM, 点击句子跳转
@@ -612,7 +617,7 @@
     // 歌词同步补偿: posAge 已并入位置基准(onStateImpl), 此处仅需
     // 管道传输延迟(~0.3s)。EMA 滤波消除桥接帧锯齿, 大跳变直接吸附。
     // k=0.45@45ms → 收敛约 120ms, 不拖慢快歌切句
-    const target = currentPos() + (isPlaying() ? 0.34 : 0);
+    const target = currentPos() + (isPlaying() ? 0.34 : 0) + (Number(S.lyrOffset) || 0);
     if (lyricSmoothPos === null || Math.abs(target - lyricSmoothPos) > 2.5) {
       lyricSmoothPos = target;
     } else {
@@ -823,6 +828,23 @@
     lyrWinStart = -1;
     lastDomIdx = -999;
   });
+  api.onLyrOffset((v) => {
+    S.lyrOffset = Number(typeof v === 'object' ? v.value : v) || 0;
+    lyricSmoothPos = null;
+    curLineIdx = -1;
+    lastLyrCheck = 0;
+    lastDl = '\u0000';
+  });
+  api.onPerfMode((v) => { S.lowPower = !!v; document.body.classList.toggle('low-power', S.lowPower); });
+  api.onHotkey((action) => {
+    if (action === 'toggle') api.command('toggle');
+    else if (action === 'prev') api.command('prev');
+    else if (action === 'next') api.command('next');
+    else if (action === 'favorite') toggleFav();
+    else if (action === 'desktopLyrics') {
+      api.getCfg().then((cfg) => api.setCfg('dlyr', !cfg.dlyr)).catch(() => { });
+    }
+  });
   // 音源/策略变化: 丢弃当前歌词, 下一帧按新配置重新获取
   api.onLyricsRefetch(() => {
     S.lyricKey = '';
@@ -864,6 +886,7 @@
 
   // ---------------------------------------------------------------- 弹跳
   function triggerBounce() {
+    if (S.lowPower) return;
     island.classList.remove('bounce');
     void island.offsetWidth; // 强制 reflow 以重启动画
     island.classList.add('bounce');

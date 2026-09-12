@@ -56,6 +56,14 @@
           </span>
           <span class="md3-nav-item__label">日志</span>
         </button>
+        <button class="md3-nav-item" data-page="diagnostics">
+          <span class="md3-nav-item__icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 4h16v16H4zM7 8h10M7 12h6M7 16h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <span class="md3-nav-item__label">诊断</span>
+        </button>
       </nav>
     </aside>
 
@@ -65,6 +73,12 @@
       <!-- 常规 -->
       <section id="page-general" class="md3-page active">
         <h1 class="md3-page-title">常规</h1>
+        <div class="md3-update-notice" id="updateNotice" hidden>
+          <div class="md3-update-notice__title" id="updateNoticeTitle">更新完成</div>
+          <div class="md3-update-notice__body" id="updateNoticeBody"></div>
+          <ul class="md3-update-notice__list" id="updateNoticeList"></ul>
+          <button class="md3-btn md3-btn--tonal" id="btnDismissNotice">知道了</button>
+        </div>
 
         <div class="md3-section-label">外观与功能</div>
         <div class="md3-group">
@@ -80,6 +94,16 @@
           </div>
           <div class="md3-row">
             <div class="md3-row__txt">
+              <div class="md3-row__headline">低性能模式</div>
+              <div class="md3-row__support">降低歌词刷新与动画开销，适合低配置电脑</div>
+            </div>
+            <label class="md3-switch">
+              <input type="checkbox" id="swLowPower" aria-label="低性能模式">
+              <span class="md3-switch__track"></span>
+            </label>
+          </div>
+          <div class="md3-row">
+            <div class="md3-row__txt">
               <div class="md3-row__headline">桌面歌词</div>
               <div class="md3-row__support">屏幕底部显示当前歌词句</div>
             </div>
@@ -87,6 +111,16 @@
               <input type="checkbox" id="swDlyr" aria-label="桌面歌词">
               <span class="md3-switch__track"></span>
             </label>
+          </div>
+          <div class="md3-row">
+            <div class="md3-row__txt">
+              <div class="md3-row__headline">歌词同步偏移</div>
+              <div class="md3-row__support">全局偏移；正值提前、负值延后</div>
+            </div>
+            <div class="md3-slider">
+              <input type="range" id="rngLyrOffset" min="-10" max="10" step="0.1" aria-label="歌词同步偏移">
+              <span class="md3-slider__val" id="rngLyrOffsetVal">0.0 秒</span>
+            </div>
           </div>
           <div class="md3-row">
             <div class="md3-row__txt">
@@ -267,7 +301,7 @@
           </div>
         </div>
         <div class="md3-section-label">更新</div>
-        <div class="md3-group">
+        <div class="md3-group" id="updatePanel" aria-live="polite">
           <div class="md3-row">
             <div class="md3-row__txt">
               <div class="md3-row__headline" id="updTitle">检查更新</div>
@@ -279,10 +313,17 @@
             </div>
           </div>
           <div class="md3-progress-wrap" id="updProg" hidden>
-            <div class="md3-progress"><div class="md3-progress__fill" id="updFill"></div></div>
+            <ol class="update-steps" id="updateSteps">
+              <li data-stage="download">下载</li><li data-stage="verify">校验</li><li data-stage="extract">解压</li><li data-stage="restart">重启</li>
+            </ol>
+            <div class="md3-progress" role="progressbar" aria-label="更新进度" id="updBar"><div class="md3-progress__fill" id="updFill"></div></div>
             <div class="md3-progress__txt" id="updTxt"></div>
           </div>
         </div>
+        <details class="release-details">
+          <summary id="releaseTitle">当前版本更新内容</summary>
+          <ul id="releaseChanges"></ul>
+        </details>
       </section>
 
       <!-- 听歌数据 -->
@@ -333,9 +374,41 @@
         <div class="md3-log" id="logBox"></div>
       </section>
 
+      <section id="page-diagnostics" class="md3-page">
+        <h1 class="md3-page-title">诊断</h1>
+        <div class="md3-sum" id="diagUpdated">等待数据</div>
+        <div class="md3-section-label">媒体桥接</div>
+        <div class="md3-group" id="diagBridge"></div>
+        <div class="md3-section-label">当前媒体</div>
+        <div class="md3-group" id="diagMedia"></div>
+        <div class="md3-section-label">歌词获取</div>
+        <div class="md3-group" id="diagLyric"></div>
+        <div class="md3-section-label">当前歌曲偏移</div>
+        <div class="track-offset">
+          <div id="offsetTrack">当前没有曲目</div>
+          <div class="offset-controls">
+            <input id="trackOffset" type="range" min="-10" max="10" step="0.1" aria-label="当前歌曲歌词偏移">
+            <output id="trackOffsetValue">0.0 秒</output>
+          </div>
+          <div class="md3-actions">
+            <button class="md3-btn md3-btn--tonal" id="btnOffsetSave">保存到当前歌曲</button>
+            <button class="md3-btn md3-btn--tonal" id="btnOffsetReset">跟随全局</button>
+          </div>
+        </div>
+        <div class="md3-section-label">快捷键</div>
+        <div class="md3-group" id="diagShortcuts"></div>
+        <div class="md3-actions">
+          <button class="md3-btn md3-btn--tonal" id="btnDiagRefresh">立即刷新</button>
+          <button class="md3-btn md3-btn--tonal" id="btnLyricsRetry">重新获取歌词</button>
+          <button class="md3-btn md3-btn--tonal" id="btnBridgeReconnect">重新连接</button>
+        </div>
+        <p id="diagnosticFeedback" class="diagnostic-feedback" role="status"></p>
+      </section>
+
     </main>
     </div>
   </div>
   <script src="settings.js"></script>
+  <script src="settings-tools.js"></script>
 </body>
 </html>

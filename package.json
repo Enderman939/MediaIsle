@@ -1,12 +1,14 @@
 {
   "name": "mediaisle",
-  "version": "1.1.1+20260905.1827",
+  "version": "1.2.0",
   "description": "MediaIsle - Dynamic Island style media controller for Windows",
   "productName": "MediaIsle",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "node scripts/write-build-info.js && electron-builder --win --x64"
+    "dist": "node scripts/write-build-info.js && electron-builder --win --x64 && node scripts/gen-latest.js",
+    "test": "node --test tests/*.test.cjs",
+    "test:ui": "node tests/electron-smoke.cjs"
   },
   "build": {
     "appId": "com.enderman939.mediaisle",
@@ -19,12 +21,16 @@
       "preload.js",
       "bridge.ps1",
       "renderer/**/*",
+      "lib/**/*",
+      "scripts/install-update.ps1",
+      "release-notes.json",
       "assets/**/*",
       "build-info.json",
       "package.json"
     ],
     "asarUnpack": [
-      "bridge.ps1"
+      "bridge.ps1",
+      "scripts/install-update.ps1"
     ],
     "npmRebuild": false,
     "win": {
@@ -41,7 +47,8 @@
   },
   "devDependencies": {
     "electron": "^37.0.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "playwright-core": "^1.58.2"
   },
   "dependencies": {
     "lmdb": "^3.5.6",

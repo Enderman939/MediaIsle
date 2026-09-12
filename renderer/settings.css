@@ -6,6 +6,7 @@
 
 /* ------------------------------------------------ 令牌 (MD3 baseline dark) */
 :root {
+  --md-sys-color-success: #A5D6A7;
   /* 颜色 */
   --md-sys-color-primary: #D0BCFF;
   --md-sys-color-on-primary: #381E72;
@@ -44,6 +45,7 @@
   /* 字体规格 (尺寸/行高/字重/字距按 MD3 Type Scale) */
   --ts-headline-small: 400 24px/32px var(--md-ref-typeface-plain);
   --ts-title-medium: 500 16px/24px var(--md-ref-typeface-plain);
+  --ts-title-large: 400 22px/28px var(--md-ref-typeface-plain);
   --ts-title-small: 500 14px/20px var(--md-ref-typeface-plain);
   --ts-body-large: 400 16px/24px var(--md-ref-typeface-plain);
   --ts-body-medium: 400 14px/20px var(--md-ref-typeface-plain);
@@ -67,6 +69,7 @@
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 html, body {
   width: 100%;
@@ -530,6 +533,7 @@ body {
 .md3-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
   padding: 4px 4px 0;
 }
 .md3-hist { max-height: 300px; overflow-y: auto; }
@@ -714,4 +718,58 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .md3-app, .md3-page.active, .md3-log .ln { animation: none !important; }
   * { transition-duration: 0s !important; }
+}
+
+/* Update and diagnostics share the settings page's existing tonal roles. */
+.md3-update-notice {
+  margin: 12px 4px 4px;
+  padding: 16px 0 18px 16px;
+  border-left: 3px solid var(--md-sys-color-success);
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+}
+.md3-update-notice__title { font: var(--ts-title-medium); color: var(--md-sys-color-success); }
+.md3-update-notice__body { margin-top: 4px; color: var(--md-sys-color-on-surface-variant); overflow-wrap: anywhere; }
+.md3-update-notice__list, .release-details ul { padding: 12px 0 16px 20px; }
+.md3-update-notice__list li, .release-details li { margin: 6px 0; line-height: 1.6; }
+.release-details { margin: 16px 4px; color: var(--md-sys-color-on-surface-variant); }
+.release-details summary { cursor: pointer; color: var(--md-sys-color-on-surface); font: var(--ts-title-small); }
+.update-steps { list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 16px; }
+.update-steps li { padding-top: 8px; border-top: 2px solid var(--md-sys-color-outline-variant); color: var(--md-sys-color-on-surface-variant); font: var(--ts-label-medium); }
+.update-steps .active { border-color: var(--md-sys-color-primary); color: var(--md-sys-color-primary); }
+.update-steps .done { border-color: var(--md-sys-color-success); color: var(--md-sys-color-success); }
+#updatePanel .md3-row { flex-wrap: wrap; }
+#updatePanel .md3-row__txt { min-width: 170px; }
+#updatePanel[data-stage="error"] #updTitle,
+#updatePanel[data-stage="check-error"] #updTitle { color: var(--md-sys-color-error); }
+#updSub, #updTxt { overflow-wrap: anywhere; }
+.md3-progress.indeterminate .md3-progress__fill { animation: updateSweep 1.4s ease-in-out infinite; }
+@keyframes updateSweep { from { transform: translateX(-100%); } to { transform: translateX(390%); } }
+.diag-row { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 16px; padding: 12px 16px; align-items: start; }
+.diag-row + .diag-row, .shortcut-row + .shortcut-row { border-top: 1px solid var(--md-sys-color-outline-variant); }
+.diag-row > span:first-child { color: var(--md-sys-color-on-surface-variant); }
+.diag-value { text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.diag-value.hit { color: var(--md-sys-color-success); }
+.diag-value.error, .diag-value.timeout { color: var(--md-sys-color-error); }
+.diag-value.loading { color: var(--md-sys-color-primary); }
+.track-offset { padding: 8px 4px; }
+#offsetTrack { overflow-wrap: anywhere; margin-bottom: 12px; }
+.offset-controls { display: grid; grid-template-columns: minmax(0, 1fr) 132px; align-items: center; gap: 16px; padding: 8px 0; }
+.offset-controls input { width: 100%; accent-color: var(--md-sys-color-primary); }
+.offset-controls output { font-variant-numeric: tabular-nums; text-align: right; color: var(--md-sys-color-on-surface-variant); }
+.shortcut-row { display: grid; grid-template-columns: 100px minmax(80px, 1fr) 58px auto; gap: 8px; padding: 12px 16px; align-items: center; }
+.shortcut-row input { min-width: 0; width: 100%; padding: 9px; border-radius: 4px; border: 1px solid var(--md-sys-color-outline); color: var(--md-sys-color-on-surface); background: transparent; font: var(--ts-body-small); }
+.shortcut-row button { padding: 0 12px; }
+.shortcut-status { color: var(--md-sys-color-on-surface-variant); font: var(--ts-label-medium); }
+.diagnostic-feedback { min-height: 24px; margin: 12px 4px; color: var(--md-sys-color-primary); }
+@media (max-width: 740px) {
+  .md3-drawer { width: 168px; padding: 12px 8px; }
+  .md3-page { padding: 16px; }
+  .shortcut-row { grid-template-columns: 1fr auto; }
+  .shortcut-row input { grid-column: 1; grid-row: 2; }
+  .shortcut-row .shortcut-status { grid-column: 2; grid-row: 1; }
+  .md3-row { flex-wrap: wrap; }
+  .md3-row__txt { min-width: 130px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .md3-progress.indeterminate .md3-progress__fill { animation: none; width: 100% !important; opacity: .5; }
 }

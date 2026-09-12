@@ -29,6 +29,9 @@ contextBridge.exposeInMainWorld('island', {
   onLyrSize: (cb) => ipcRenderer.on('lyr-size-changed', (_e, v) => cb(v)),
 
   onExpWidth: (cb) => ipcRenderer.on('exp-width-changed', (_e, v) => cb(v)),
+  onLyrOffset: (cb) => ipcRenderer.on('lyr-offset-changed', (_e, v) => cb(v)),
+  onPerfMode: (cb) => ipcRenderer.on('perf-mode-changed', (_e, v) => cb(v)),
+  onHotkey: (cb) => ipcRenderer.on('hotkey-action', (_e, action) => cb(action)),
   // 歌词源/策略变化: 重新抓取当前曲目歌词
   onLyricsRefetch: (cb) => ipcRenderer.on('lyrics-refetch', () => cb()),
   // 桌面歌词字号
@@ -45,7 +48,14 @@ contextBridge.exposeInMainWorld('island', {
   // 自动更新(打包版): 状态查询 / 执行更新 / 进度推送
   updateGet: (force) => ipcRenderer.invoke('update-get', force === true),
   updateApply: () => ipcRenderer.invoke('update-apply'),
+  updateNoticeGet: () => ipcRenderer.invoke('update-notice-get'),
+  updateNoticeAck: () => ipcRenderer.invoke('update-notice-ack'),
   onUpdateStatus: (cb) => ipcRenderer.on('update-status', (_e, v) => cb(v)),
+  diagnosticsGet: () => ipcRenderer.invoke('diagnostics-get'),
+  diagnosticsRetry: () => ipcRenderer.invoke('diagnostics-retry'),
+  bridgeReconnect: () => ipcRenderer.invoke('bridge-reconnect'),
+  trackOffsetSet: (q) => ipcRenderer.invoke('track-offset-set', q),
+  shortcutSet: (action, value) => ipcRenderer.invoke('shortcut-set', action, value),
   // 运行日志
   logGet: () => ipcRenderer.invoke('log-get'),
   logClear: () => ipcRenderer.send('log-clear'),
