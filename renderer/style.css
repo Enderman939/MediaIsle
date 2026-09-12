@@ -642,6 +642,11 @@ body.glass .e-lyrics::after  { background: linear-gradient(rgba(24,24,30,0), rgb
 .e-foot .btn-xs:hover { color: rgba(255, 255, 255, .85); }
 
 /* ---------------------------------------------------------------- 毛玻璃模式 (模拟半透明) */
+body.low-power .eq i,
+body.low-power .face-idle .ic-note,
+body.low-power .marquee-track.scrolling { animation-play-state: paused; }
+body.low-power .yl-track { transition: none; }
+
 body.glass #island {
   background: rgba(24, 24, 30, .66);
   box-shadow:
