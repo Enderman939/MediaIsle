@@ -35,6 +35,10 @@ const rngDlSubVal = document.getElementById('rngDlSubVal');
 
   const api = window.island;
   if (!api) return;
+  // 平台差异: 全屏检测由 Windows 桥接提供, 其它平台隐藏该行
+  if (api.platform && api.platform !== 'win32') {
+    document.getElementById('rowFsHide')?.remove();
+  }
 
   // ---------------------------------------------------------------- 侧边导航
   const pages = document.querySelectorAll('.md3-page');

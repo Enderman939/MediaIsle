@@ -43,6 +43,26 @@
         }
       ],
       "artifactName": "MediaIsle-${version}-portable.${ext}"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.music",
+      "artifactName": "MediaIsle-${version}-${arch}-mac.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Audio",
+      "artifactName": "MediaIsle-${version}-${arch}-linux.${ext}"
     }
   },
   "devDependencies": {
@@ -51,6 +71,7 @@
     "playwright-core": "^1.58.2"
   },
   "dependencies": {
+    "dbus-next": "^0.10.2",
     "lmdb": "^3.5.6",
     "ws": "^8.21.3"
   }

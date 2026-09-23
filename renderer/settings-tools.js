@@ -123,6 +123,14 @@
 
   const mb = (bytes) => ((bytes || 0) / 1048576).toFixed(1) + ' MB';
   function renderUpdate(st) {
+    if (st.platform && st.platform !== 'win32') {
+      $('btnRecheck').hidden = true;
+      $('btnUpdate').hidden = true;
+      $('updProg').hidden = true;
+      $('updTitle').textContent = '当前平台暂不支持应用内更新';
+      $('updSub').textContent = '请前往 GitHub Releases 页面下载最新版本';
+      return;
+    }
     const busy = !!st.busy;
     const index = stages.indexOf(st.stage);
     $('updatePanel').dataset.stage = st.stage;

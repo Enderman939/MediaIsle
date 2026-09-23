@@ -2,6 +2,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('island', {
+  platform: process.platform,
   // 订阅媒体状态推送
   onState: (cb) => ipcRenderer.on('media-state', (_e, state) => cb(state)),
   // 订阅悬停状态变化(主进程光标命中检测)

@@ -298,10 +298,28 @@ function createWindow() {
 }
 
 // ---------------------------------------------------------------- 桥接
+// Windows: PowerShell 桥接(SMTC)。Linux: MPRIS(D-Bus)。macOS: osascript(Spotify/Music)。
+let platformBridge = null; // 非 Windows 平台的轮询桥接句柄
 function startBridge() {
-  if (bridge || app.isQuitting) return;
-  bridgeReady = false;
+  if (bridge || platformBridge || app.isQuitting) return;
   bridgeLastStart = Date.now();
+  if (process.platform !== 'win32') {
+    try {
+      const mod = process.platform === 'linux' ? require('./lib/bridge/mpris') : require('./lib/bridge/macos');
+      platformBridge = mod.start({
+        onLine: (msg) => handleBridgeLine(msg),
+        onError: (e) => logErr(`[bridge:${process.platform}]`, (e && e.message) || e),
+      });
+      bridge = { platform: process.platform }; // 诊断可见的哨兵句柄
+      bridgeReady = true;
+      console.log('[bridge] 平台桥接已启动:', process.platform);
+    } catch (e) {
+      logErr('[bridge]', '平台桥接启动失败:', e);
+      platformBridge = null;
+      bridge = null;
+    }
+    return;
+  }
   // 打包后 bridge.ps1 位于 asar 解包目录(PowerShell 子进程无法读取 asar 内部)
   let bridgePath = path.join(__dirname, 'bridge.ps1');
   if (bridgePath.includes('app.asar') && !bridgePath.includes('app.asar.unpacked')) {
@@ -390,6 +408,10 @@ function handleBridgeLine(msg) {
 }
 
 function sendCommand(cmd, val, extra) {
+  if (process.platform !== 'win32') {
+    platformBridge?.sendCommand(cmd, val)?.catch?.(() => { });
+    return;
+  }
   // 数值 -> position(seek/volume), 字符串 -> appId(switch-source)
   let payload;
   if (typeof val === 'number' && isFinite(val)) payload = { cmd, position: val };
@@ -535,7 +557,8 @@ function send2(ch, ...args) {
 }
 
 async function checkForUpdate() {
-  if (!app.isPackaged || !localBuildDate) return null;
+  // 更新器依赖 Windows 换文件脚本, 仅在 Windows 打包版启用
+  if (!app.isPackaged || !localBuildDate || process.platform !== 'win32') return null;
     // net.fetch: Chromium 网络栈, 走系统代理与系统证书 (直连 fetch 在代理/拦截环境下不可用)
     const res = await net.fetch('https://github.com/' + REPO + '/releases/latest/download/latest.json', { signal: AbortSignal.timeout(10000) });
     if (!res.ok) throw new Error('检查更新失败: HTTP ' + res.status);
@@ -726,7 +749,7 @@ async function downloadUpdate(candidates, sha256) {
 }
 
 async function applyUpdate() {
-  if (!app.isPackaged || updateBusy) return false;
+  if (!app.isPackaged || updateBusy || process.platform !== 'win32') return false;
   const avail = updateAvail || await runUpdateCheck(true);
   if (!avail || !avail.zip) return false;
   updateBusy = true;
@@ -820,8 +843,8 @@ function updateThumbar() {
 }
 
 ipcMain.handle('update-get', async (_e, force) => {
-  if (force === true && app.isPackaged && localBuildDate) await runUpdateCheck(true);
-  return { packaged: !!app.isPackaged, version: app.getVersion(), localBuildDate, available: updateAvail, stage: updateStage,
+  if (force === true && app.isPackaged && localBuildDate && process.platform === 'win32') await runUpdateCheck(true);
+  return { packaged: !!app.isPackaged, platform: process.platform, version: app.getVersion(), localBuildDate, available: updateAvail, stage: updateStage,
     busy: updateBusy, message: updateMessage, prog: updateProg, notes: releaseNotes };
 });
 ipcMain.handle('update-apply', () => applyUpdate());
@@ -1051,7 +1074,7 @@ ipcMain.on('win-ctrl', (e, action) => {
 ipcMain.handle('cfg-get', () => ({
   glass: !!cfg.glass,
   dlyr: !!cfg.dlyr,
-  autostart: app.getLoginItemSettings().openAtLogin,
+  autostart: (() => { try { return app.getLoginItemSettings().openAtLogin; } catch { return false; } })(),
   lyrSources: Array.isArray(cfg.lyrSources) ? cfg.lyrSources.slice() : ['soda', 'netease', 'qq', 'kugou'],
   lyrStrategy: cfg.lyrStrategy === 'quality' ? 'quality' : 'race',
   fsHide: cfg.fsHide !== false,
@@ -1078,7 +1101,7 @@ ipcMain.handle('cfg-set', (_e, key, val) => {
     saveCfg();
     if (cfg.dlyr) ensureDlyrics(); else closeDlyrics();
   } else if (key === 'autostart') {
-    app.setLoginItemSettings({ openAtLogin: !!val });
+    try { app.setLoginItemSettings({ openAtLogin: !!val }); } catch (e) { logErr('[autostart]', e); }
   } else if (key === 'lyrSources') {
     if (Array.isArray(val)) {
       const ids = val.filter((id) => LYRIC_SOURCES.some((s) => s.id === id));
@@ -2060,6 +2083,7 @@ if (!app.requestSingleInstanceLock()) {
     clearTimeout(cfgTimer);
     try { fs.writeFileSync(CFG_FILE, JSON.stringify(cfg)); } catch { }
     if (statsDirty) { try { fs.writeFileSync(STATS_FILE, JSON.stringify(stats)); } catch { } }
+    try { platformBridge?.stop?.(); } catch { }
     try { globalShortcut.unregisterAll(); } catch { }
   });
 
