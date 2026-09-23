@@ -1,6 +1,7 @@
 {
   "name": "mediaisle",
   "version": "1.2.1",
+  "desktopName": "MediaIsle",
   "description": "MediaIsle - Dynamic Island style media controller for Windows",
   "productName": "MediaIsle",
   "main": "main.js",
@@ -62,7 +63,8 @@
         "AppImage"
       ],
       "category": "Audio",
-      "artifactName": "MediaIsle-${version}-${arch}-linux.${ext}"
+      "artifactName": "MediaIsle-${version}-${arch}-linux.${ext}",
+      "syncDesktopName": true
     }
   },
   "devDependencies": {

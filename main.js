@@ -309,6 +309,7 @@ function startBridge() {
       platformBridge = mod.start({
         onLine: (msg) => handleBridgeLine(msg),
         onError: (e) => logErr(`[bridge:${process.platform}]`, (e && e.message) || e),
+        fsEnabled: () => !!cfg.fsHide,
       });
       bridge = { platform: process.platform }; // 诊断可见的哨兵句柄
       bridgeReady = true;
@@ -1074,7 +1075,9 @@ ipcMain.on('win-ctrl', (e, action) => {
 ipcMain.handle('cfg-get', () => ({
   glass: !!cfg.glass,
   dlyr: !!cfg.dlyr,
-  autostart: (() => { try { return app.getLoginItemSettings().openAtLogin; } catch { return false; } })(),
+  autostart: process.platform === 'linux'
+    ? require('./lib/autostart').isEnabled()
+    : (() => { try { return app.getLoginItemSettings().openAtLogin; } catch { return false; } })(),
   lyrSources: Array.isArray(cfg.lyrSources) ? cfg.lyrSources.slice() : ['soda', 'netease', 'qq', 'kugou'],
   lyrStrategy: cfg.lyrStrategy === 'quality' ? 'quality' : 'race',
   fsHide: cfg.fsHide !== false,
@@ -1101,7 +1104,16 @@ ipcMain.handle('cfg-set', (_e, key, val) => {
     saveCfg();
     if (cfg.dlyr) ensureDlyrics(); else closeDlyrics();
   } else if (key === 'autostart') {
-    try { app.setLoginItemSettings({ openAtLogin: !!val }); } catch (e) { logErr('[autostart]', e); }
+    try {
+      if (process.platform === 'linux') {
+        const execLine = app.isPackaged
+          ? `"${process.execPath}"`
+          : `"${process.execPath}" "${app.getAppPath()}"`;
+        require('./lib/autostart').setEnabled(execLine, !!val);
+      } else {
+        app.setLoginItemSettings({ openAtLogin: !!val });
+      }
+    } catch (e) { logErr('[autostart]', e); }
   } else if (key === 'lyrSources') {
     if (Array.isArray(val)) {
       const ids = val.filter((id) => LYRIC_SOURCES.some((s) => s.id === id));
