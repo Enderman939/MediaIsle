@@ -121,6 +121,39 @@
   }, 1000);
   window.addEventListener('beforeunload', () => clearInterval(diagnosticTimer));
 
+  let lyricsSaving = false;
+  let lyricsInfoBusy = false;
+  let downloadQuery = null;
+  async function refreshDownloadInfo() {
+    if (lyricsInfoBusy) return;
+    lyricsInfoBusy = true;
+    try {
+      const info = await api.lyricsDownloadInfo();
+      downloadQuery = info.available ? { title: info.title, artist: info.artist } : null;
+      $('lyricsDownloadTrack').textContent = info.available ? `${info.title} · ${info.artist || '未知歌手'}${info.ready ? ' · ' + (info.source || '歌词已就绪') : ' · 下载时获取歌词'}` : '当前没有歌曲可下载';
+      $('btnLyricsDownload').disabled = lyricsSaving || !info.available;
+    } catch (error) { $('lyricsDownloadFeedback').textContent = error.message; }
+    finally { lyricsInfoBusy = false; }
+  }
+  $('btnLyricsDownload').onclick = async () => {
+    if (lyricsSaving || !downloadQuery) return;
+    const request = { ...downloadQuery };
+    lyricsSaving = true;
+    $('btnLyricsDownload').disabled = true;
+    $('lyricsDownloadFeedback').textContent = '正在打开歌词下载窗口…';
+    try {
+      const r = await api.openLyricsDownload(request);
+      $('lyricsDownloadFeedback').textContent = r.ok ? '已打开下载窗口，请选择文件格式和歌词语言。' : r.message || '打开失败';
+    } catch (error) { $('lyricsDownloadFeedback').textContent = error.message; }
+    finally { lyricsSaving = false; await refreshDownloadInfo(); }
+  };
+  const downloadInfoTimer = setInterval(() => {
+    if (!document.hidden && $('page-general').classList.contains('active')) refreshDownloadInfo();
+  }, 1500);
+  window.addEventListener('settings-page', (e) => { if (e.detail === 'general') refreshDownloadInfo(); });
+  window.addEventListener('beforeunload', () => clearInterval(downloadInfoTimer));
+  refreshDownloadInfo();
+
   const mb = (bytes) => ((bytes || 0) / 1048576).toFixed(1) + ' MB';
   function renderUpdate(st) {
     if (st.platform && st.platform !== 'win32') {

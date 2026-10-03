@@ -3,6 +3,13 @@
   const songLine = document.getElementById('songLine');
   const status = document.getElementById('status');
   const list = document.getElementById('list');
+  const btnDownload = document.getElementById('btnDownload');
+  const downloadFeedback = document.getElementById('downloadFeedback');
+  let picking = false;
+  let saving = false;
+  function syncDownloadButton() {
+    btnDownload.disabled = picking || saving || !ctx.title;
+  }
   const srcName = { soda: '汽水', netease: '网易', qq: 'QQ', kugou: '酷狗' };
 
   document.getElementById('btnClose').addEventListener('click', () => window.close());
@@ -24,6 +31,9 @@
       const row = document.createElement('div');
       row.className = 'row';
       row.dataset.key = c.key;
+      row.dataset.src = c.src;
+      row.tabIndex = 0;
+      row.setAttribute('role', 'button');
       const src = document.createElement('span');
       src.className = 'src';
       src.textContent = srcName[c.src] || c.src;
@@ -44,6 +54,9 @@
       row.appendChild(meta);
       row.appendChild(dur);
       row.addEventListener('click', async () => {
+        if (picking || saving) return;
+        picking = true;
+        syncDownloadButton();
         status.textContent = '正在应用…';
         const r = await window.island.lyrPick({
           songKey: (ctx.title + '|' + ctx.artist),
@@ -57,24 +70,37 @@
         } else {
           status.textContent = '应用失败' + (r && r.message ? '：' + r.message : '，请重试其他候选');
         }
+        picking = false;
+        syncDownloadButton();
+      });
+      row.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); }
       });
       list.appendChild(row);
     }
   }
 
   let ctx = {};
+  btnDownload.addEventListener('click', async () => {
+    if (btnDownload.disabled) return;
+    saving = true;
+    syncDownloadButton();
+    downloadFeedback.textContent = '正在打开下载窗口…';
+    try {
+      const result = await window.island.openLyricsDownload({ title: ctx.title, artist: ctx.artist || '', duration: ctx.duration });
+      downloadFeedback.textContent = result.ok ? '已打开当前版本的下载窗口。' : result.message || '打开失败';
+    } catch (error) { downloadFeedback.textContent = error.message; }
+    finally { saving = false; syncDownloadButton(); }
+  });
   (async () => {
     try {
       ctx = await window.island.lyrFixContext();
+      syncDownloadButton();
       songLine.textContent = [ctx.title, ctx.artist].filter(Boolean).join(' — ');
       const cands = await window.island.lyrCandidates(ctx);
-      if (ctx.pickedKey) {
-        const picked = cands.find((c) => c.key === ctx.pickedKey);
-        if (picked) picked.pickedMark = true;
-      }
       render(cands);
       if (ctx.pickedKey) {
-        const cur = [...list.querySelectorAll('.row')].find((r) => r.dataset.key === ctx.pickedKey);
+        const cur = [...list.querySelectorAll('.row')].find((r) => r.dataset.key === String(ctx.pickedKey) && r.dataset.src === ctx.pickedSource);
         if (cur) { cur.classList.add('picked'); status.textContent = '当前使用此版本（点击其他候选可切换）'; }
       }
     } catch (e) {

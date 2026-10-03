@@ -14,6 +14,7 @@ const zlib = require('zlib');
 const { AsyncLocalStorage } = require('async_hooks');
 const { parseRelease, isNewer, resolveNotice } = require('./lib/release');
 const { DEFAULT_SHORTCUTS, trackKey, clampOffset, effectiveOffset, normalizeShortcut } = require('./lib/preferences');
+const { createExport, inspectLyrics } = require('./lib/lyrics-export');
 const releaseNotes = require('./release-notes.json');
 
 // Isolated user data for local verification; normal launches use Electron's default path.
@@ -452,6 +453,7 @@ const ISLAND_TOP = 3; // 岛距窗口顶部偏移(stage padding-top)
 let islandState = 'idle';
 let hoverInside = false;
 let islandDragging = false;
+let islandSavingLyrics = false;
 
 function islandScreenRect() {
   const s = ISLAND_RECTS[islandState] || ISLAND_RECTS.idle;
@@ -471,7 +473,7 @@ function evaluateHover() {
   const r = islandScreenRect();
   const c = screen.getCursorScreenPoint();
   const inside = c.x >= r.x && c.x <= r.x + r.w && c.y >= r.y && c.y <= r.y + r.h;
-  const target = islandDragging ? true : inside; // 拖动进度时保持展开
+  const target = islandDragging || islandSavingLyrics ? true : inside; // 拖动进度或保存歌词时保持展开
   if (target !== hoverInside) {
     hoverInside = target;
     win.setIgnoreMouseEvents(!hoverInside);
@@ -1064,9 +1066,9 @@ function createSettingsWindow() {
   setWin.on('closed', () => { setWin = null; });
 }
 
-// 自绘标题栏窗口控制(设置窗口 / 歌词纠错窗口)
+// 自绘标题栏窗口控制
 ipcMain.on('win-ctrl', (e, action) => {
-  const w = [setWin, lyrFixWin].find((x) => x && !x.isDestroyed() && x.webContents === e.sender);
+  const w = [setWin, lyrFixWin, lyricsDownloadWin].find((x) => x && !x.isDestroyed() && x.webContents === e.sender);
   if (!w) return;
   if (action === 'minimize') w.minimize();
   else if (action === 'close') w.close();
@@ -1747,7 +1749,7 @@ async function measuredSource(source, query, runId, relaxed = false) {
 }
 
 async function fetchLyrics(query) {
-  const { title, artist, duration } = query || {};
+  const { title, artist = '', duration } = query || {};
   if (!title) return { lines: [], src: '', dur: 0 };
   const key = (title + '|' + artist).toLowerCase();
   const runId = ++lyricRun;
@@ -1759,8 +1761,11 @@ async function fetchLyrics(query) {
     return cached;
   }
   const strat = cfg.lyrStrategy === 'quality' ? 'quality' : 'race';
+  const pickAtStart = lyrPicks[key];
 
   const finish = (lines, src, dur, trans) => {
+    // A manual choice made while an automatic lookup was running wins over that lookup.
+    if (lyrPicks[key] !== pickAtStart && lyrCache.get(key)?.lines?.length) return lyrCache.get(key);
     const r = { lines: lines || [], src: src || '', dur: dur || 0, trans: trans || [] };
     lyrCache.set(key, r);
     if (runId === lyricRun) lyricDiagnostic.selected = src || '';
@@ -1862,7 +1867,7 @@ let lyrFixCtx = null;
 ipcMain.handle('lyrfix-open', (_e, ctx) => {
   const songKey = (((ctx && ctx.title) || '') + '|' + ((ctx && ctx.artist) || '')).toLowerCase();
   const picked = lyrPicks[songKey];
-  lyrFixCtx = { ...(ctx || {}), pickedKey: (picked && picked.key) || '' };
+  lyrFixCtx = { ...(ctx || {}), pickedKey: (picked && picked.key) || '', pickedSource: (picked && picked.src) || '' };
   if (lyrFixWin && !lyrFixWin.isDestroyed()) { lyrFixWin.focus(); return { ok: true }; }
   lyrFixWin = new BrowserWindow({
     width: 480,
@@ -1993,6 +1998,135 @@ ipcMain.handle('lyr-pick', async (_e, p) => {
 });
 
 ipcMain.handle('fetch-lyrics', (_e, q) => fetchLyrics(q || {}).catch(() => ({ lines: [], src: '' })));
+
+ipcMain.handle('lyrics-download-info', () => {
+  const m = lastMediaState;
+  if (!m?.hasSession || !m.title) return { available: false };
+  const cached = lyrCache.get((m.title + '|' + (m.artist || '')).toLowerCase());
+  return { available: true, title: m.title, artist: m.artist || '',
+    ready: !!cached?.lines?.length, hasTranslation: !!cached?.trans?.length, source: cached?.src || '' };
+});
+
+let lyricsDownloadWin = null;
+let lyricsDownloadCtx = null;
+let lyricsDownloadSeq = 0;
+
+function downloadQuery(request) {
+  request = request && typeof request === 'object' ? request : {};
+  const m = lastMediaState?.hasSession ? lastMediaState : {};
+  const title = typeof request.title === 'string' ? request.title : m.title;
+  const artist = typeof request.artist === 'string' ? request.artist : m.artist || '';
+  if (!title) throw new Error('当前没有歌曲可下载');
+  return { title, artist, duration: Number(request.duration) || m.duration || 0 };
+}
+
+function lyricsSnapshot(lyrics) {
+  const info = inspectLyrics(lyrics || {});
+  return { lines: info.originals, trans: info.translations, src: lyrics?.src || '' };
+}
+
+async function resolveDownloadContext(ctx) {
+  if (!ctx) throw new Error('请先打开歌词下载窗口');
+  if (!ctx.loading) ctx.loading = (async () => {
+    const key = (ctx.title + '|' + ctx.artist).toLowerCase();
+    const lyrics = ctx.lyrics || lyrCache.get(key) || await fetchLyrics(ctx);
+    ctx.lyrics = lyricsSnapshot(lyrics);
+    const info = inspectLyrics(ctx.lyrics);
+    if (!info.originals.length) throw new Error('这首歌还没有可下载的歌词，请先获取歌词或选择其他版本');
+    return { id: ctx.id, title: ctx.title, artist: ctx.artist, source: ctx.lyrics.src, languages: info.languages,
+      originalLines: info.originals.length, translatedLines: info.aligned };
+  })();
+  return ctx.loading;
+}
+
+ipcMain.handle('lyrics-download-open', (_event, request) => {
+  try {
+    if (lyricsDownloadBusy) return { ok: false, message: '请先完成或取消当前歌词保存' };
+    const query = downloadQuery(request);
+    const cached = lyrCache.get((query.title + '|' + query.artist).toLowerCase());
+    lyricsDownloadCtx = { ...query, id: ++lyricsDownloadSeq,
+      lyrics: request?.lyrics && Array.isArray(request.lyrics.lines) ? lyricsSnapshot(request.lyrics) : cached ? lyricsSnapshot(cached) : null };
+    if (lyricsDownloadWin && !lyricsDownloadWin.isDestroyed()) {
+      if (lyricsDownloadWin.isMinimized()) lyricsDownloadWin.restore();
+      lyricsDownloadWin.focus();
+      lyricsDownloadWin.webContents.send('lyrics-download-changed');
+      return { ok: true };
+    }
+    lyricsDownloadWin = new BrowserWindow({
+      width: 640, height: 720, minWidth: 480, minHeight: 540,
+      title: '歌词下载 - MediaIsle', backgroundColor: '#141218', frame: false, autoHideMenuBar: true,
+      webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, spellcheck: false },
+    });
+    try { lyricsDownloadWin.setAlwaysOnTop(true, 'screen-saver'); } catch { }
+    lyricsDownloadWin.loadFile(path.join(__dirname, 'renderer', 'lyrics-download.html'));
+    attachConsoleForward(lyricsDownloadWin, 'lyrics-download');
+    lyricsDownloadWin.on('closed', () => { lyricsDownloadWin = null; lyricsDownloadCtx = null; });
+    return { ok: true };
+  } catch (error) { return { ok: false, message: error.message }; }
+});
+
+ipcMain.handle('lyrics-download-context', async () => {
+  const ctx = lyricsDownloadCtx;
+  try {
+    const info = await resolveDownloadContext(ctx);
+    return lyricsDownloadCtx === ctx ? { ok: true, ...info } : { ok: false, stale: true };
+  } catch (error) { return { ok: false, message: error.message }; }
+});
+
+ipcMain.handle('lyrics-download-preview', async (_event, request = {}) => {
+  try {
+    const ctx = lyricsDownloadCtx;
+    if (!ctx || request.contextId !== ctx.id) throw new Error('下载曲目已更新，请重新选择');
+    await resolveDownloadContext(ctx);
+    const exported = createExport({ ...ctx, ...ctx.lyrics, format: request.format, language: request.language });
+    return { ok: true, ...exported };
+  } catch (error) { return { ok: false, message: error.message }; }
+});
+
+// Resolve lyrics before opening the dialog so a track change during Save cannot mix versions.
+let lyricsDownloadBusy = false;
+ipcMain.handle('lyrics-download', async (event, request = {}) => {
+  if (lyricsDownloadBusy) return { ok: false, message: '已有歌词保存窗口打开，请先完成或取消' };
+  lyricsDownloadBusy = true;
+  let pinned = false;
+  try {
+    request = request && typeof request === 'object' ? request : {};
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    if (!owner || owner.isDestroyed()) return { ok: false, canceled: true };
+    let query, result;
+    if (request.contextId !== undefined) {
+      const ctx = lyricsDownloadCtx;
+      if (!ctx || request.contextId !== ctx.id) throw new Error('下载曲目已更新，请重新选择');
+      await resolveDownloadContext(ctx);
+      query = ctx;
+      result = ctx.lyrics;
+    } else {
+      query = downloadQuery(request);
+      const key = (query.title + '|' + query.artist).toLowerCase();
+      result = request.lyrics && Array.isArray(request.lyrics.lines)
+        ? request.lyrics : lyrCache.get(key) || await fetchLyrics(query);
+    }
+    const exported = createExport({ ...query, lines: result?.lines, trans: result?.trans, format: request.format || 'txt', language: request.language || 'original' });
+    if (owner.isDestroyed()) return { ok: false, canceled: true };
+    if (owner === win) { islandSavingLyrics = true; pinned = true; }
+    const saved = await dialog.showSaveDialog(owner, {
+      title: '下载歌词',
+      defaultPath: path.join(app.getPath('downloads'), exported.filename),
+      filters: [{ name: { lrc: 'LRC 歌词', md: 'Markdown 文档', txt: '文本文件' }[exported.extension], extensions: [exported.extension] }],
+      properties: ['createDirectory', 'showOverwriteConfirmation'],
+    });
+    if (saved.canceled || !saved.filePath) return { ok: false, canceled: true };
+    const filePath = path.extname(saved.filePath) ? saved.filePath : saved.filePath + '.' + exported.extension;
+    await fs.promises.writeFile(filePath, exported.content, 'utf8');
+    return { ok: true, path: filePath, lines: exported.lines, translatedRows: exported.translatedRows };
+  } catch (error) {
+    logErr('[lyrics:download]', error.message);
+    return { ok: false, message: error.message || '保存歌词失败' };
+  } finally {
+    lyricsDownloadBusy = false;
+    if (pinned) islandSavingLyrics = false;
+  }
+});
 
 // 桌面歌词窗口
 let dlWin = null;

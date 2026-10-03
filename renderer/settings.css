@@ -761,6 +761,10 @@ body {
 .shortcut-row button { padding: 0 12px; }
 .shortcut-status { color: var(--md-sys-color-on-surface-variant); font: var(--ts-label-medium); }
 .diagnostic-feedback { min-height: 24px; margin: 12px 4px; color: var(--md-sys-color-primary); }
+.lyrics-download-row { flex-wrap: wrap; }
+.lyrics-download-row .md3-row__txt { min-width: 140px; }
+.lyrics-download-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.lyrics-export-feedback { color: var(--md-sys-color-on-surface-variant); padding: 0 16px 12px; overflow-wrap: anywhere; }
 @media (max-width: 740px) {
   .md3-drawer { width: 168px; padding: 12px 8px; }
   .md3-page { padding: 16px; }

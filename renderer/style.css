@@ -640,6 +640,8 @@ body.glass .e-lyrics::after  { background: linear-gradient(rgba(24,24,30,0), rgb
 .e-foot .btn-xs { color: rgba(255, 255, 255, .55); }
 .e-foot .btn-xs svg { width: 15px; height: 15px; }
 .e-foot .btn-xs:hover { color: rgba(255, 255, 255, .85); }
+.lyrics-download-status { font-size: 10.5px; color: rgba(255,255,255,.72); white-space: nowrap; max-width: 132px; overflow: hidden; text-overflow: ellipsis; }
+.lyrics-download-status[hidden] { display: none; }
 
 /* ---------------------------------------------------------------- 毛玻璃模式 (模拟半透明) */
 body.low-power .eq i,

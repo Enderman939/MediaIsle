@@ -18,6 +18,12 @@ contextBridge.exposeInMainWorld('island', {
   command: (cmd, val) => ipcRenderer.send('media-command', cmd, val),
   // 歌词查询: {title, artist, duration} -> Promise<{lines:[{t, x}]}>
   getLyrics: (q) => ipcRenderer.invoke('fetch-lyrics', q),
+  downloadLyrics: (q) => ipcRenderer.invoke('lyrics-download', q),
+  lyricsDownloadInfo: () => ipcRenderer.invoke('lyrics-download-info'),
+  openLyricsDownload: (q) => ipcRenderer.invoke('lyrics-download-open', q),
+  lyricsDownloadContext: () => ipcRenderer.invoke('lyrics-download-context'),
+  lyricsDownloadPreview: (q) => ipcRenderer.invoke('lyrics-download-preview', q),
+  onLyricsDownloadChanged: (cb) => ipcRenderer.on('lyrics-download-changed', () => cb()),
   // 推送当前桌面歌词行
   desktopLine: (text) => ipcRenderer.send('desktop-lyric', text),
   // 桌面歌词窗口订阅歌词行

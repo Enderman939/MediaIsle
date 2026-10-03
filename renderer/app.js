@@ -28,6 +28,16 @@
   const nArt = $('nArt'), nArtImg = $('nArtImg'), nTitle = $('nTitle'), nSub = $('nSub');
   const eLyrics = $('eLyrics'), ylTrack = $('ylTrack'), srcChips = $('srcChips'), eStats = $('eStats');
   const flBack = $('flBack'), flCount = $('flCount'), flList = $('flList');
+  const btnLyricsDownload = $('btnLyricsDownload');
+  const downloadStatus = $('lyricsDownloadStatus');
+  let downloadingLyrics = false;
+  let downloadFeedbackTimer = null;
+  let lyricRequestId = 0;
+
+  function syncDownloadButton() {
+    btnLyricsDownload.disabled = downloadingLyrics || !S.hasSession || !S.lyrics?.length;
+    btnLyricsDownload.title = downloadingLyrics ? '正在打开下载窗口…' : !S.lyrics?.length ? '歌词获取成功后可下载' : '打开歌词下载窗口';
+  }
 
   // ---------------------------------------------------------------- 状态
   const S = {
@@ -298,17 +308,21 @@
     if (lk !== S.lyricKey) {
       S.lyricKey = lk;
       S.lyrics = null;
+      S.trans = [];
+      const requestId = ++lyricRequestId;
+      syncDownloadButton();
       curLineIdx = -1;
       if (S.title) {
         const wantKey = lk;
         api.getLyrics({ title: S.title, artist: S.artist, duration: S.duration })
           .then((r) => {
-            if ((S.title + '|' + S.artist).toLowerCase() === wantKey) {
+            if (requestId === lyricRequestId && (S.title + '|' + S.artist).toLowerCase() === wantKey) {
               S.lyrics = (r && r.lines) || [];
               S.trans = (r && r.trans) || [];
               // 无时间轴播放器: 采用歌词源返回的曲目时长作为进度基准
               if (r && r.dur > 0 && !(S.duration > 0)) S.duration = r.dur;
               curLineIdx = -1;
+              syncDownloadButton();
             }
           })
           .catch(() => { });
@@ -320,6 +334,7 @@
 
   // ---------------------------------------------------------------- 渲染
   function render() {
+    syncDownloadButton();
     island.classList.toggle('paused', !isPlaying());
 
     if (!S.hasSession) {
@@ -805,6 +820,27 @@
   const openLyricFix = () => { if (S.hasSession && S.title && api.lyrFixOpen) api.lyrFixOpen({ title: S.title, artist: S.artist, duration: S.duration }); };
   const btnLyrFix = $('btnLyrFix');
   btnLyrFix.addEventListener('click', (e) => { e.stopPropagation(); openLyricFix(); });
+  btnLyricsDownload.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (btnLyricsDownload.disabled) return;
+    const query = { title: S.title, artist: S.artist, duration: S.duration,
+      lyrics: { lines: S.lyrics, trans: S.trans } };
+    downloadingLyrics = true;
+    syncDownloadButton();
+    clearTimeout(downloadFeedbackTimer);
+    downloadStatus.hidden = false;
+    downloadStatus.textContent = '打开下载窗口…';
+    try {
+      const r = await api.openLyricsDownload(query);
+      downloadStatus.textContent = r.ok ? '下载窗口已打开' : r.message || '打开失败';
+      downloadStatus.title = r.message || '';
+    } catch (error) { downloadStatus.textContent = '打开失败'; downloadStatus.title = error.message; }
+    finally {
+      downloadingLyrics = false;
+      syncDownloadButton();
+      downloadFeedbackTimer = setTimeout(() => { downloadStatus.hidden = true; }, 5000);
+    }
+  });
   eLyrics.addEventListener('contextmenu', (e) => { e.preventDefault(); openLyricFix(); });
 
   // ---------------------------------------------------------------- 毛玻璃 / 双语字幕 / 字号
@@ -847,10 +883,13 @@
   });
   // 音源/策略变化: 丢弃当前歌词, 下一帧按新配置重新获取
   api.onLyricsRefetch(() => {
+    lyricRequestId++;
     S.lyricKey = '';
+    lyricsBuiltKey = '';
     S.lyrics = null;
     S.trans = [];
     curLineIdx = -1;
+    syncDownloadButton();
   });
 
   // ---------------------------------------------------------------- 控制
