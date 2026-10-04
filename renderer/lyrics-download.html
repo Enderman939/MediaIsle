@@ -17,11 +17,25 @@
       <div class="song-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 17V4l10-2v13M10 7l10-2"/><ellipse cx="6.5" cy="17" rx="3.5" ry="2.5"/><ellipse cx="16.5" cy="15" rx="3.5" ry="2.5"/></svg></div>
       <div class="song-details"><h1 id="songTitle">正在准备歌词…</h1><p id="songArtist"></p><p class="source" id="songSource">打开后保留此曲目的歌词版本</p></div>
     </section>
+    <div class="workspace-actions" id="singleActions"><button class="button tonal" id="btnEdit" aria-expanded="false">编辑歌词</button><span class="note">修改原文、译文与单句时间</span></div>
+    <section id="editorPanel" hidden aria-label="歌词编辑器">
+      <p class="note">时间单位为秒。修改原文时间时，对齐的译文会一起移动；保存后会用于岛体与下载。预览不会保存修改。</p>
+      <h2>原文</h2><div id="editorLines" class="editor-rows"></div><button class="button tonal small" id="btnAddLine">添加原文</button>
+      <h2>译文</h2><div id="editorTrans" class="editor-rows"></div><button class="button tonal small" id="btnAddTrans">添加译文</button>
+      <div class="workspace-actions"><button class="button primary" id="btnSaveCustom">保存自定义版本</button><button class="button tonal" id="btnRevert">撤销修改</button><button class="button tonal" id="btnResetCustom" hidden>删除自定义并恢复在线版本</button></div>
+      <p id="editorFeedback" class="feedback" role="status"></p>
+    </section>
+    <section id="batchPanel" hidden aria-label="收藏批量导出">
+      <div class="workspace-actions"><h2>选择收藏歌曲</h2><button class="button tonal small" id="btnSelectAll">全选 / 清空</button></div>
+      <div id="batchTracks" class="batch-tracks"></div>
+      <p class="note">每首歌使用同一格式和语言。缺少歌词或所选语言会显示失败原因。已有文件会自动加序号保留。</p>
+      <progress id="batchProgress" value="0" max="1" hidden></progress><p id="batchSummary" class="feedback" role="status"></p><div id="batchResults"></div>
+    </section>
     <fieldset id="formatChoices" disabled>
       <legend>文件格式</legend>
       <div class="choices formats">
-        <label class="choice"><input type="radio" name="format" value="md"><span><strong>Markdown</strong><small>.md · 适合笔记</small></span></label>
-        <label class="choice"><input type="radio" name="format" value="txt" checked><span><strong>纯文本</strong><small>.txt · 通用文本</small></span></label>
+        <label class="choice"><input type="radio" name="format" value="md"><span><strong>Markdown</strong><small>.md · 带时间轴</small></span></label>
+        <label class="choice"><input type="radio" name="format" value="txt" checked><span><strong>纯文本</strong><small>.txt · 带时间轴</small></span></label>
         <label class="choice"><input type="radio" name="format" value="lrc"><span><strong>LRC</strong><small>.lrc · 保留时间轴</small></span></label>
       </div>
     </fieldset>
@@ -34,16 +48,16 @@
         <label class="choice"><input type="radio" name="language" value="original"><span><strong>原文</strong><small id="hint-original">保留歌曲原有语言</small></span></label>
       </div>
     </fieldset>
-    <section class="preview-card" aria-labelledby="previewTitle">
+    <section class="preview-card" id="previewCard" aria-labelledby="previewTitle">
       <div class="preview-heading"><h2 id="previewTitle">文件预览</h2><span id="previewCount"></span></div>
       <div class="filename" id="previewFilename">选择格式和语言后预览</div>
       <pre id="previewContent" tabindex="0" aria-label="歌词文件内容预览">正在加载…</pre>
     </section>
-    <p class="note">语言选项取决于当前版本已有的歌词和译文。双语中没有译文的句子保留原文。</p>
+    <p class="note" id="singleNote">所有格式均保留歌词源时间轴。语言选项取决于已有歌词和译文；双语中没有译文的句子保留原文。</p>
   </main>
   <footer>
     <p id="downloadFeedback" class="feedback" role="status" aria-live="polite">正在获取歌词…</p>
-    <div class="footer-actions"><button class="button tonal" id="btnCancel">关闭</button><button class="button primary" id="btnSave" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 17v4h14v-4"/></svg>保存歌词</button></div>
+    <div class="footer-actions"><button class="button tonal" id="btnStopBatch" hidden>停止导出</button><button class="button tonal" id="btnCancel">关闭</button><button class="button primary" id="btnSave" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 17v4h14v-4"/></svg><span id="saveLabel">保存歌词</span></button></div>
   </footer>
   <script src="lyrics-download.js"></script>
 </body>

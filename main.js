@@ -15,6 +15,7 @@ const { AsyncLocalStorage } = require('async_hooks');
 const { parseRelease, isNewer, resolveNotice } = require('./lib/release');
 const { DEFAULT_SHORTCUTS, trackKey, clampOffset, effectiveOffset, normalizeShortcut } = require('./lib/preferences');
 const { createExport, inspectLyrics } = require('./lib/lyrics-export');
+const { exportPreferences, validateLyrics, batchTracks } = require('./lib/lyrics-library');
 const releaseNotes = require('./release-notes.json');
 
 // Isolated user data for local verification; normal launches use Electron's default path.
@@ -112,6 +113,29 @@ function saveCfg() {
     try { fs.writeFileSync(CFG_FILE, JSON.stringify(cfg)); } catch { }
   }, 600);
 }
+
+const CUSTOM_LYRICS_FILE = path.join(app.getPath('userData'), 'lyrics-custom.json');
+let customLyrics = {};
+try {
+  const stored = JSON.parse(fs.readFileSync(CUSTOM_LYRICS_FILE, 'utf8'));
+  for (const [key, value] of Object.entries(stored)) {
+    try { customLyrics[key] = validateLyrics(value); } catch { }
+  }
+} catch { }
+function persistCustomLyrics(next) {
+  const temp = CUSTOM_LYRICS_FILE + '.tmp';
+  fs.writeFileSync(temp, JSON.stringify(next), 'utf8');
+  fs.renameSync(temp, CUSTOM_LYRICS_FILE);
+  customLyrics = next;
+}
+ipcMain.handle('lyrics-export-preferences', (_event, value) => {
+  if (value) {
+    const previous = exportPreferences(cfg.lyricsExport);
+    cfg.lyricsExport = exportPreferences({ ...previous, format: value.format, language: value.language });
+    saveCfg();
+  }
+  return exportPreferences(cfg.lyricsExport);
+});
 
 // 旧版单值歌词策略迁移: lyrics -> lyrSources + lyrStrategy
 if (!Array.isArray(cfg.lyrSources)) {
@@ -472,7 +496,13 @@ function evaluateHover() {
   if (!win || win.isDestroyed() || !win.isVisible()) return;
   const r = islandScreenRect();
   const c = screen.getCursorScreenPoint();
-  const inside = c.x >= r.x && c.x <= r.x + r.w && c.y >= r.y && c.y <= r.y + r.h;
+  const overIsland = c.x >= r.x && c.x <= r.x + r.w && c.y >= r.y && c.y <= r.y + r.h;
+  // The search capsule sits 8px below the expanded island. Include the gap so
+  // moving from lyrics into the search field keeps both visible and clickable.
+  const dockWidth = Math.min(300, r.w - 40);
+  const overDock = islandState === 'expanded' && c.x >= r.x + r.w - dockWidth && c.x <= r.x + r.w
+    && c.y >= r.y + r.h && c.y <= r.y + r.h + 8 + 30;
+  const inside = overIsland || overDock;
   const target = islandDragging || islandSavingLyrics ? true : inside; // 拖动进度或保存歌词时保持展开
   if (target !== hoverInside) {
     hoverInside = target;
@@ -510,6 +540,12 @@ ipcMain.on('island-state', (_e, st) => {
 ipcMain.on('island-dragging', (_e, d) => {
   islandDragging = !!d;
   if (!islandDragging) evaluateHover();
+});
+ipcMain.handle('island-input-focus', (event, enabled) => {
+  if (!win || win.isDestroyed() || event.sender !== win.webContents) return false;
+  win.setFocusable(enabled === true);
+  if (enabled === true) win.focus();
+  return true;
 });
 
 ipcMain.on('media-command', (_e, cmd, val) => {
@@ -1748,13 +1784,15 @@ async function measuredSource(source, query, runId, relaxed = false) {
   return result === timeout ? null : result;
 }
 
-async function fetchLyrics(query) {
+async function fetchLyrics(query, useCustom = true) {
   const { title, artist = '', duration } = query || {};
   if (!title) return { lines: [], src: '', dur: 0 };
   const key = (title + '|' + artist).toLowerCase();
+  const customKey = trackKey(title, artist);
+  if (useCustom && customLyrics[customKey]) return customLyrics[customKey];
   const runId = ++lyricRun;
   lyricDiagnostic = { key, title, artist: artist || '', selected: '', cache: false, sources: {} };
-  if (lyrCache.has(key)) {
+  if (useCustom && lyrCache.has(key)) {
     const cached = lyrCache.get(key);
     lyricDiagnostic.selected = cached.src;
     lyricDiagnostic.cache = true;
@@ -1764,10 +1802,11 @@ async function fetchLyrics(query) {
   const pickAtStart = lyrPicks[key];
 
   const finish = (lines, src, dur, trans) => {
+    if (useCustom && customLyrics[customKey]) return customLyrics[customKey];
     // A manual choice made while an automatic lookup was running wins over that lookup.
-    if (lyrPicks[key] !== pickAtStart && lyrCache.get(key)?.lines?.length) return lyrCache.get(key);
+    if (useCustom && lyrPicks[key] !== pickAtStart && lyrCache.get(key)?.lines?.length) return lyrCache.get(key);
     const r = { lines: lines || [], src: src || '', dur: dur || 0, trans: trans || [] };
-    lyrCache.set(key, r);
+    if (useCustom) lyrCache.set(key, r);
     if (runId === lyricRun) lyricDiagnostic.selected = src || '';
     if (lines && lines.length) {
       // 日志 ASCII 转义: 终端代码页不一致时也不会显示乱码
@@ -1975,6 +2014,8 @@ ipcMain.handle('lyr-pick', async (_e, p) => {
   try {
     const { songKey, src, key } = p || {};
     if (!songKey || !src || !key) return { ok: false };
+    const track = p.title ? p : lyrFixCtx && (lyrFixCtx.title + '|' + (lyrFixCtx.artist || '')).toLowerCase() === songKey.toLowerCase() ? lyrFixCtx : null;
+    if (track && customLyrics[trackKey(track.title, track.artist)]) return { ok: false, message: '此曲目正在使用自定义版本，请在下载窗口的编辑器中恢复在线版本后再选择候选' };
     let lastMsg = '';
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -2002,7 +2043,7 @@ ipcMain.handle('fetch-lyrics', (_e, q) => fetchLyrics(q || {}).catch(() => ({ li
 ipcMain.handle('lyrics-download-info', () => {
   const m = lastMediaState;
   if (!m?.hasSession || !m.title) return { available: false };
-  const cached = lyrCache.get((m.title + '|' + (m.artist || '')).toLowerCase());
+  const cached = customLyrics[trackKey(m.title, m.artist || '')] || lyrCache.get((m.title + '|' + (m.artist || '')).toLowerCase());
   return { available: true, title: m.title, artist: m.artist || '',
     ready: !!cached?.lines?.length, hasTranslation: !!cached?.trans?.length, source: cached?.src || '' };
 });
@@ -2022,18 +2063,21 @@ function downloadQuery(request) {
 
 function lyricsSnapshot(lyrics) {
   const info = inspectLyrics(lyrics || {});
-  return { lines: info.originals, trans: info.translations, src: lyrics?.src || '' };
+  return { lines: info.originals, trans: info.translations, src: lyrics?.src || '', dur: Number(lyrics?.dur) || 0 };
 }
 
 async function resolveDownloadContext(ctx) {
   if (!ctx) throw new Error('请先打开歌词下载窗口');
+  if (ctx.tracks) return { id: ctx.id, mode: 'batch', tracks: ctx.tracks, preferences: exportPreferences(cfg.lyricsExport) };
   if (!ctx.loading) ctx.loading = (async () => {
     const key = (ctx.title + '|' + ctx.artist).toLowerCase();
     const lyrics = ctx.lyrics || lyrCache.get(key) || await fetchLyrics(ctx);
+    ctx.duration = ctx.duration || lyrics?.dur || 0;
     ctx.lyrics = lyricsSnapshot(lyrics);
     const info = inspectLyrics(ctx.lyrics);
     if (!info.originals.length) throw new Error('这首歌还没有可下载的歌词，请先获取歌词或选择其他版本');
-    return { id: ctx.id, title: ctx.title, artist: ctx.artist, source: ctx.lyrics.src, languages: info.languages,
+    return { id: ctx.id, mode: 'single', title: ctx.title, artist: ctx.artist, source: ctx.lyrics.src, languages: info.languages,
+      lyrics: ctx.lyrics, custom: !!customLyrics[trackKey(ctx.title, ctx.artist)], preferences: exportPreferences(cfg.lyricsExport),
       originalLines: info.originals.length, translatedLines: info.aligned };
   })();
   return ctx.loading;
@@ -2042,8 +2086,9 @@ async function resolveDownloadContext(ctx) {
 ipcMain.handle('lyrics-download-open', (_event, request) => {
   try {
     if (lyricsDownloadBusy) return { ok: false, message: '请先完成或取消当前歌词保存' };
-    const query = downloadQuery(request);
-    const cached = lyrCache.get((query.title + '|' + query.artist).toLowerCase());
+    if (lyricsDownloadCtx?.dirty) return { ok: false, message: '编辑器有未保存的修改，请先保存自定义版本或撤销修改' };
+    const query = request?.tracks ? { tracks: batchTracks(request.tracks) } : downloadQuery(request);
+    const cached = query.tracks ? null : customLyrics[trackKey(query.title, query.artist)] || lyrCache.get((query.title + '|' + query.artist).toLowerCase());
     lyricsDownloadCtx = { ...query, id: ++lyricsDownloadSeq,
       lyrics: request?.lyrics && Array.isArray(request.lyrics.lines) ? lyricsSnapshot(request.lyrics) : cached ? lyricsSnapshot(cached) : null };
     if (lyricsDownloadWin && !lyricsDownloadWin.isDestroyed()) {
@@ -2060,7 +2105,13 @@ ipcMain.handle('lyrics-download-open', (_event, request) => {
     try { lyricsDownloadWin.setAlwaysOnTop(true, 'screen-saver'); } catch { }
     lyricsDownloadWin.loadFile(path.join(__dirname, 'renderer', 'lyrics-download.html'));
     attachConsoleForward(lyricsDownloadWin, 'lyrics-download');
-    lyricsDownloadWin.on('closed', () => { lyricsDownloadWin = null; lyricsDownloadCtx = null; });
+    lyricsDownloadWin.on('close', (event) => {
+      if (lyricsDownloadCtx?.dirty && !app.isQuitting) {
+        event.preventDefault();
+        lyricsDownloadWin.webContents.send('lyrics-close-blocked');
+      }
+    });
+    lyricsDownloadWin.on('closed', () => { if (lyricsBatchJob?.running) lyricsBatchJob.canceled = true; lyricsDownloadWin = null; lyricsDownloadCtx = null; });
     return { ok: true };
   } catch (error) { return { ok: false, message: error.message }; }
 });
@@ -2074,17 +2125,25 @@ ipcMain.handle('lyrics-download-context', async () => {
 });
 
 ipcMain.handle('lyrics-download-preview', async (_event, request = {}) => {
+  let languages;
   try {
     const ctx = lyricsDownloadCtx;
     if (!ctx || request.contextId !== ctx.id) throw new Error('下载曲目已更新，请重新选择');
     await resolveDownloadContext(ctx);
-    const exported = createExport({ ...ctx, ...ctx.lyrics, format: request.format, language: request.language });
-    return { ok: true, ...exported };
-  } catch (error) { return { ok: false, message: error.message }; }
+    if (lyricsDownloadCtx !== ctx) throw new Error('下载曲目已更新，请重新选择');
+    const lyrics = request.draft ? validateLyrics(request.draft) : ctx.lyrics;
+    languages = inspectLyrics(lyrics).languages;
+    const exported = createExport({ ...ctx, ...lyrics, format: request.format, language: request.language });
+    return { ok: true, ...exported, languages };
+  } catch (error) { return { ok: false, message: error.message, languages }; }
 });
 
 // Resolve lyrics before opening the dialog so a track change during Save cannot mix versions.
 let lyricsDownloadBusy = false;
+ipcMain.handle('lyrics-editor-dirty', (_event, request = {}) => {
+  if (lyricsDownloadCtx?.id === request.contextId) lyricsDownloadCtx.dirty = request.dirty === true;
+  return true;
+});
 ipcMain.handle('lyrics-download', async (event, request = {}) => {
   if (lyricsDownloadBusy) return { ok: false, message: '已有歌词保存窗口打开，请先完成或取消' };
   lyricsDownloadBusy = true;
@@ -2098,26 +2157,29 @@ ipcMain.handle('lyrics-download', async (event, request = {}) => {
       const ctx = lyricsDownloadCtx;
       if (!ctx || request.contextId !== ctx.id) throw new Error('下载曲目已更新，请重新选择');
       await resolveDownloadContext(ctx);
+      if (lyricsDownloadCtx !== ctx) throw new Error('下载曲目已更新，请重新选择');
       query = ctx;
       result = ctx.lyrics;
     } else {
       query = downloadQuery(request);
       const key = (query.title + '|' + query.artist).toLowerCase();
       result = request.lyrics && Array.isArray(request.lyrics.lines)
-        ? request.lyrics : lyrCache.get(key) || await fetchLyrics(query);
+        ? request.lyrics : customLyrics[trackKey(query.title, query.artist)] || lyrCache.get(key) || await fetchLyrics(query);
     }
     const exported = createExport({ ...query, lines: result?.lines, trans: result?.trans, format: request.format || 'txt', language: request.language || 'original' });
     if (owner.isDestroyed()) return { ok: false, canceled: true };
     if (owner === win) { islandSavingLyrics = true; pinned = true; }
     const saved = await dialog.showSaveDialog(owner, {
       title: '下载歌词',
-      defaultPath: path.join(app.getPath('downloads'), exported.filename),
+      defaultPath: path.join(exportPreferences(cfg.lyricsExport).directory || app.getPath('downloads'), exported.filename),
       filters: [{ name: { lrc: 'LRC 歌词', md: 'Markdown 文档', txt: '文本文件' }[exported.extension], extensions: [exported.extension] }],
       properties: ['createDirectory', 'showOverwriteConfirmation'],
     });
     if (saved.canceled || !saved.filePath) return { ok: false, canceled: true };
     const filePath = path.extname(saved.filePath) ? saved.filePath : saved.filePath + '.' + exported.extension;
     await fs.promises.writeFile(filePath, exported.content, 'utf8');
+    cfg.lyricsExport = exportPreferences({ format: exported.extension, language: request.language || 'original', directory: path.dirname(filePath) });
+    saveCfg();
     return { ok: true, path: filePath, lines: exported.lines, translatedRows: exported.translatedRows };
   } catch (error) {
     logErr('[lyrics:download]', error.message);
@@ -2126,6 +2188,111 @@ ipcMain.handle('lyrics-download', async (event, request = {}) => {
     lyricsDownloadBusy = false;
     if (pinned) islandSavingLyrics = false;
   }
+});
+
+ipcMain.handle('lyrics-custom-save', async (_event, request = {}) => {
+  try {
+    if (lyricsDownloadBusy) throw new Error('请先完成当前导出');
+    const ctx = lyricsDownloadCtx;
+    if (!ctx || ctx.tracks || ctx.id !== request.contextId) throw new Error('编辑曲目已更新，请重新打开');
+    const lyrics = validateLyrics(request.lyrics);
+    lyrics.dur = ctx.duration || ctx.lyrics?.dur || 0;
+    persistCustomLyrics({ ...customLyrics, [trackKey(ctx.title, ctx.artist)]: lyrics });
+    lyrCache.set((ctx.title + '|' + ctx.artist).toLowerCase(), lyrics);
+    ctx.lyrics = lyrics;
+    ctx.dirty = false;
+    ctx.loading = null;
+    send('lyrics-refetch');
+    return { ok: true, ...await resolveDownloadContext(ctx) };
+  } catch (error) { return { ok: false, message: error.message }; }
+});
+
+ipcMain.handle('lyrics-custom-reset', async (_event, request = {}) => {
+  if (lyricsDownloadBusy) return { ok: false, message: '请先完成当前导出' };
+  lyricsDownloadBusy = true;
+  try {
+    const ctx = lyricsDownloadCtx;
+    if (!ctx || ctx.tracks || ctx.id !== request.contextId) throw new Error('编辑曲目已更新，请重新打开');
+    const lyrics = await fetchLyrics(ctx, false);
+    if (!lyrics?.lines?.length) throw new Error('暂时无法获取在线歌词，自定义版本已保留，请稍后再试');
+    if (lyricsDownloadCtx !== ctx) return { ok: false, stale: true };
+    const next = { ...customLyrics };
+    delete next[trackKey(ctx.title, ctx.artist)];
+    persistCustomLyrics(next);
+    lyrCache.set((ctx.title + '|' + ctx.artist).toLowerCase(), lyrics);
+    ctx.lyrics = lyricsSnapshot(lyrics);
+    ctx.dirty = false;
+    ctx.loading = null;
+    send('lyrics-refetch');
+    const info = await resolveDownloadContext(ctx);
+    return lyricsDownloadCtx === ctx ? { ok: true, ...info } : { ok: false, stale: true };
+  } catch (error) { return { ok: false, message: error.message }; }
+  finally { lyricsDownloadBusy = false; }
+});
+
+// Match both song and playback session before seeking from a lyric result.
+ipcMain.handle('lyrics-seek', (_event, request = {}) => {
+  const m = lastMediaState;
+  const lyrics = m && (customLyrics[trackKey(m.title, m.artist || '')] || lyrCache.get((m.title + '|' + (m.artist || '')).toLowerCase()));
+  const duration = Number(m?.duration) > 0 ? Number(m.duration) : Number(lyrics?.dur) || 0;
+  if (!m?.hasSession || duration <= 0 || trackKey(m.title, m.artist || '') !== trackKey(request.title, request.artist || '') || (request.appId && request.appId !== m.appId))
+    return { ok: false, message: '当前播放曲目已改变，无法定位这句歌词' };
+  const position = Number(request.position);
+  if (!Number.isFinite(position) || position < 0 || position > duration) return { ok: false, message: '这句歌词超出了可播放时间' };
+  // Some SMTC players report canSeek=false although position commands work.
+  sendCommand('seek', position);
+  return { ok: true, position };
+});
+
+let lyricsBatchJob = null;
+ipcMain.handle('lyrics-batch-cancel', () => {
+  if (lyricsBatchJob?.running) lyricsBatchJob.canceled = true;
+  return true;
+});
+ipcMain.handle('lyrics-batch-export', async (event, request = {}) => {
+  if (lyricsDownloadBusy) return { ok: false, message: '请先完成当前导出' };
+  lyricsDownloadBusy = true;
+  const job = lyricsBatchJob = { running: true, canceled: false, results: [], total: 0 };
+  const progress = () => {
+    if (!event.sender.isDestroyed()) event.sender.send('lyrics-batch-progress', { results: job.results, total: job.total, running: job.running, canceled: job.canceled });
+  };
+  try {
+    const ctx = lyricsDownloadCtx;
+    if (!ctx?.tracks || ctx.id !== request.contextId) throw new Error('收藏列表已更新，请重新打开');
+    const tracks = batchTracks(request.tracks);
+    const allowed = new Set(ctx.tracks.map((t) => trackKey(t.title, t.artist)));
+    if (tracks.some((t) => !allowed.has(trackKey(t.title, t.artist)))) throw new Error('请选择列表中的收藏歌曲');
+    const prefs = exportPreferences(cfg.lyricsExport);
+    if (!['txt', 'md', 'lrc'].includes(request.format) || !['original', 'chinese', 'english', 'bilingual'].includes(request.language)) throw new Error('请选择有效的格式和语言');
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    if (!owner || owner.isDestroyed()) return { ok: false, canceled: true };
+    job.total = tracks.length;
+    const selected = await dialog.showOpenDialog(owner, { title: '选择批量导出文件夹', defaultPath: prefs.directory || app.getPath('downloads'), properties: ['openDirectory', 'createDirectory'] });
+    if (selected.canceled || !selected.filePaths?.[0]) return { ok: false, canceled: true };
+    const directory = selected.filePaths[0];
+    cfg.lyricsExport = exportPreferences({ format: request.format, language: request.language, directory });
+    saveCfg();
+    progress();
+    for (const track of tracks) {
+      if (job.canceled || owner.isDestroyed()) break;
+      try {
+        const lyrics = await fetchLyrics(track);
+        if (job.canceled || owner.isDestroyed()) break;
+        const exported = createExport({ ...track, ...lyrics, format: request.format, language: request.language });
+        let filePath;
+        for (let suffix = 0; ; suffix++) {
+          const name = suffix ? path.basename(exported.filename, '.' + exported.extension) + ' (' + suffix + ').' + exported.extension : exported.filename;
+          filePath = path.join(directory, name);
+          try { await fs.promises.writeFile(filePath, exported.content, { encoding: 'utf8', flag: 'wx' }); break; }
+          catch (error) { if (error.code !== 'EEXIST') throw error; }
+        }
+        job.results.push({ ...track, ok: true, path: filePath });
+      } catch (error) { job.results.push({ ...track, ok: false, message: error.message }); }
+      progress();
+    }
+    return { ok: true, canceled: job.canceled, results: job.results, total: job.total, directory };
+  } catch (error) { return { ok: false, message: error.message }; }
+  finally { job.running = false; progress(); lyricsDownloadBusy = false; }
 });
 
 // 桌面歌词窗口

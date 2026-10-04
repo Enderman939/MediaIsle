@@ -22,6 +22,8 @@ body {
 }
 
 #stage {
+  --exp-w: 672px;
+  position: relative;
   width: 100%;
   height: 100%;
   display: flex;
@@ -478,6 +480,35 @@ body.glass .e-lyrics::after  { background: linear-gradient(rgba(24,24,30,0), rgb
 .yl-line.on { color: #fff; font-weight: 600; }
 .yl-line:hover { color: rgba(255, 255, 255, .72); }
 .yl-line.ph { color: rgba(255, 255, 255, .22); cursor: default; pointer-events: none; }
+.lyric-dock { position: absolute; top: 225px; right: calc((100% - var(--exp-w)) / 2); width: min(300px, calc(var(--exp-w) - 40px)); height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 11px; border: 1px solid rgba(255,255,255,.1); border-radius: 15px; background: #000; color: rgba(255,255,255,.65); box-shadow: 0 3px 12px rgba(0,0,0,.3); opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(-4px); transition: opacity .16s ease, transform .2s ease, visibility 0s linear .16s; }
+#stage:has(#island[data-state="expanded"]) .lyric-dock { opacity: 1; visibility: visible; pointer-events: auto; transform: translateY(0); transition-delay: 0s; }
+.lyric-dock:focus-within { border-color: rgba(255,255,255,.28); }
+.lyric-dock svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; flex: none; }
+.lyric-dock input { flex: 1; width: 0; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: #fff; font: inherit; font-size: 11px; user-select: text; }
+.lyric-dock input::placeholder { color: rgba(255,255,255,.4); }
+.lyric-dock button { flex: none; height: 22px; padding: 0 8px; border: 0; border-radius: 11px; background: rgba(255,255,255,.09); color: rgba(255,255,255,.75); font: inherit; font-size: 10px; cursor: pointer; }
+.lyric-dock button:hover { background: rgba(255,255,255,.17); color: #fff; }
+.lyric-dock button:focus-visible { outline: 1px solid rgba(255,255,255,.65); outline-offset: 2px; }
+#btnClearLyricSearch { width: 22px; padding: 0; display: grid; place-items: center; background: transparent; }
+.lyric-action { flex: none; background: rgba(208,188,255,.15); border: 0; border-radius: 8px; padding: 5px 7px; color: #d0bcff; font-size: 10px; cursor: pointer; }
+.lyric-action:disabled { opacity: .4; cursor: default; }
+.lyric-dock button[hidden], .lyric-search-status[hidden], .lyric-scrollbar[hidden] { display: none !important; }
+.lyric-viewport { position: absolute; top: 0; bottom: 0; left: 16px; right: 12px; overflow: hidden; scrollbar-width: none; }
+.lyric-viewport::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.lyric-search-status { position: relative; z-index: 3; font-size: 10px; color: rgba(255,255,255,.6); height: 18px; padding-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.e-lyrics:has(.lyric-search-status:not([hidden])) .lyric-viewport { top: 18px; }
+.lyric-viewport.manual { overflow-y: auto; padding-bottom: 24px; }
+.lyric-viewport.manual .yl-track { position: relative; top: 0; transform: none !important; transition: none; }
+.lyric-viewport.manual .yl-line { padding: 3px 0; }
+.lyric-scrollbar { position: absolute; z-index: 3; top: 8px; bottom: 8px; right: 0; width: 12px; cursor: pointer; touch-action: none; }
+.e-lyrics:has(.lyric-search-status:not([hidden])) .lyric-scrollbar { top: 24px; }
+.lyric-scrollbar::before { content: ''; position: absolute; top: 0; bottom: 0; left: 5px; width: 3px; border-radius: 2px; background: rgba(255,255,255,.04); }
+.lyric-scroll-thumb { position: absolute; top: 0; left: 5px; width: 3px; min-height: 24px; border-radius: 2px; background: rgba(255,255,255,.28); transition: background .15s ease; }
+.lyric-scrollbar:hover .lyric-scroll-thumb, .lyric-scrollbar.dragging .lyric-scroll-thumb, .lyric-scrollbar:focus-visible .lyric-scroll-thumb { background: rgba(255,255,255,.6); }
+.lyric-scrollbar:focus-visible { outline: 1px solid rgba(255,255,255,.25); border-radius: 6px; }
+body.glass .lyric-dock { background: rgba(24,24,30,.88); }
+.yl-line mark { background: #d0bcff; color: #381e72; border-radius: 2px; }
+.fl-row input { accent-color: #d0bcff; flex: none; }
 
 /* 双语翻译副行 (自然换行) */
 .yl-sub {
@@ -648,6 +679,7 @@ body.low-power .eq i,
 body.low-power .face-idle .ic-note,
 body.low-power .marquee-track.scrolling { animation-play-state: paused; }
 body.low-power .yl-track { transition: none; }
+@media (prefers-reduced-motion: reduce) { .lyric-dock, .lyric-scroll-thumb { transition: none; } }
 
 body.glass #island {
   background: rgba(24, 24, 30, .66);

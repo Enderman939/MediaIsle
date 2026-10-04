@@ -60,6 +60,7 @@
         status.textContent = '正在应用…';
         const r = await window.island.lyrPick({
           songKey: (ctx.title + '|' + ctx.artist),
+          title: ctx.title, artist: ctx.artist,
           src: c.src,
           key: c.key,
         }).catch(() => null);

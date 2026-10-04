@@ -157,7 +157,11 @@
           </div>
         </div>
         <!-- 歌词竖栏: 展开态右侧 -->
-        <div class="e-lyrics" id="eLyrics"><div class="yl-track" id="ylTrack"><div class="yl-line ph">&#9834;</div></div></div>
+        <div class="e-lyrics" id="eLyrics">
+          <div id="lyricSearchStatus" class="lyric-search-status" role="status" hidden></div>
+          <div class="lyric-viewport" id="lyricViewport" tabindex="0" aria-label="歌词，滚动可暂停自动跟随"><div class="yl-track" id="ylTrack"><div class="yl-line ph">&#9834;</div></div></div>
+          <div class="lyric-scrollbar" id="lyricScrollbar" role="scrollbar" tabindex="0" aria-label="歌词滚动" aria-controls="lyricViewport" aria-orientation="vertical" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden><div class="lyric-scroll-thumb" id="lyricScrollThumb"></div></div>
+        </div>
       </div>
 
       <!-- 换歌通知气泡 -->
@@ -186,6 +190,7 @@
           </button>
           <div class="fl-title">我的收藏</div>
           <div class="fl-count" id="flCount"></div>
+          <button id="flExport" class="lyric-action" disabled>导出所选</button>
         </div>
         <div class="fl-list" id="flList"></div>
       </div>
@@ -203,6 +208,12 @@
         </div>
       </div>
 
+    </div>
+    <div class="lyric-dock" id="lyricDock" role="search" aria-label="歌词搜索">
+      <svg class="lyric-search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>
+      <input id="lyricSearch" type="text" placeholder="搜索歌词" aria-label="搜索歌词" autocomplete="off" spellcheck="false">
+      <button id="btnClearLyricSearch" aria-label="清空搜索" title="清空搜索" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17"/></svg></button>
+      <button id="btnFollowLyric" hidden>回到当前句</button>
     </div>
   </div>
   <script src="app.js"></script>

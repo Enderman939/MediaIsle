@@ -8,7 +8,7 @@ const song = { title: '歌曲', artist: '歌手', lines: [{ t: 62.345, x: 'Secon
 test('original LRC sorts timestamps, preserves precision and excludes translation', () => {
   const result = createExport(song);
   assert.equal(result.filename, '歌曲 - 歌手.lrc');
-  assert.equal(result.content, '[ti:歌曲]\r\n[ar:歌手]\r\n[by:MediaIsle]\r\n\r\n[00:01.00]First\r\n[01:02.35]Second\r\n');
+  assert.equal(result.content, '[ti:歌曲]\r\n[ar:歌手]\r\n\r\n[00:01.00]First\r\n[01:02.35]Second\r\n');
   assert.equal(result.lines, 2);
   assert.equal(result.translatedRows, 0);
   assert.equal(song.lines[0].x, 'Second', 'input is not mutated');
@@ -22,10 +22,10 @@ test('bilingual LRC aligns sparse translations by timestamp and keeps original t
   assert.doesNotMatch(result.content, /\[00:01\.00\]第二句/);
 });
 
-test('TXT contains readable originals and aligned translations without timestamp tags', () => {
+test('TXT preserves original and aligned translation timestamps', () => {
   const result = createExport({ ...song, format: 'txt', language: 'bilingual' });
   assert.equal(result.filename, '歌曲 - 歌手.bilingual.txt');
-  assert.equal(result.content, '歌曲 — 歌手\r\n\r\nFirst\r\nSecond\r\n第二句\r\n');
+  assert.equal(result.content, '歌曲 — 歌手\r\n\r\n[00:01.00] First\r\n[01:02.35] Second\r\n[01:02.35] 第二句\r\n');
   assert.equal(result.extension, 'txt');
 });
 
@@ -81,8 +81,8 @@ test('every file format supports each language independently', () => {
       const result = createExport({ ...song, format, language });
       assert.equal(result.extension, format);
       assert.ok(result.content.length > 0);
-      if (format === 'lrc') assert.match(result.content, /\[01:02\.35\]/);
-      else assert.doesNotMatch(result.content, /\[01:02\.35\]/);
+      assert.match(result.content, /\[01:02\.35\]/);
+      assert.doesNotMatch(result.content, /^\[by:/m);
     }
   }
 });
@@ -90,8 +90,17 @@ test('every file format supports each language independently', () => {
 test('Markdown escapes lyric markup and HTML while preserving readable line breaks', () => {
   const result = createExport({ title: '# [title]', artist: 'A * B', format: 'md', lines: [{ t: 1, x: '<script> *line* [link](url)' }] });
   assert.match(result.content, /^# \\# \\\[title\\\]/);
-  assert.ok(result.content.includes('\\<script\\> \\*line\\* \\[link\\]\\(url\\)  \r\n'));
+  assert.ok(result.content.includes('[00:01.00] \\<script\\> \\*line\\* \\[link\\]\\(url\\)  \r\n'));
   assert.doesNotMatch(result.content, /<script>/);
+});
+
+test('Markdown and TXT align bilingual timestamps and round minute boundaries', () => {
+  for (const format of ['md', 'txt']) {
+    const result = createExport({ title: 'Song', format, language: 'bilingual',
+      lines: [{ t: 59.999, x: 'Hello' }], trans: [{ t: 60.04, x: '你好' }] });
+    assert.match(result.content, /\[01:00\.00\] Hello(?:  )?\r\n\[01:00\.00\] 你好/);
+    assert.doesNotMatch(result.content, /^\[by:/m);
+  }
 });
 
 test('unavailable languages remain unavailable and Japanese is not labelled English', () => {

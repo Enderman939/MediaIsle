@@ -28,6 +28,10 @@
   const nArt = $('nArt'), nArtImg = $('nArtImg'), nTitle = $('nTitle'), nSub = $('nSub');
   const eLyrics = $('eLyrics'), ylTrack = $('ylTrack'), srcChips = $('srcChips'), eStats = $('eStats');
   const flBack = $('flBack'), flCount = $('flCount'), flList = $('flList');
+  const lyricSearch = $('lyricSearch'), lyricViewport = $('lyricViewport'), btnFollowLyric = $('btnFollowLyric');
+  const lyricScrollbar = $('lyricScrollbar'), lyricScrollThumb = $('lyricScrollThumb'), btnClearLyricSearch = $('btnClearLyricSearch');
+  let manualLyrics = false;
+  let browseKey = '';
   const btnLyricsDownload = $('btnLyricsDownload');
   const downloadStatus = $('lyricsDownloadStatus');
   let downloadingLyrics = false;
@@ -551,8 +555,18 @@
   }
 
   function buildLyricsDom(lines) {
+    const previousScroll = lyricViewport.scrollTop;
     lyricsBuiltKey = S.lyricKey + ':' + lines.length;
     rebuildTrans(lines);
+    if (browseKey !== S.lyricKey) {
+      browseKey = S.lyricKey;
+      manualLyrics = false;
+      lyricSearch.value = '';
+      btnClearLyricSearch.hidden = true;
+      lyricViewport.classList.remove('manual');
+      btnFollowLyric.hidden = true;
+      $('lyricSearchStatus').hidden = true;
+    }
     ylTrack.innerHTML = '';
     ylTrack.style.transform = 'translateY(0px)';
     lyrEls = [];
@@ -568,8 +582,148 @@
       d.textContent = '♪';
       ylTrack.appendChild(d);
       ylTrack.style.transform = 'translateY(-' + LYR_LINE_H / 2 + 'px)';
-    }
+    } else if (manualLyrics) { renderManualLyrics(); lyricViewport.scrollTop = previousScroll; }
+    syncLyricScrollbar();
   }
+
+  function highlighted(el, text, query) {
+    if (!query) { el.textContent = text; return; }
+    const lower = text.toLowerCase(); const needle = query.toLowerCase();
+    let start = 0, index;
+    while ((index = lower.indexOf(needle, start)) !== -1) {
+      el.appendChild(document.createTextNode(text.slice(start, index)));
+      const mark = document.createElement('mark'); mark.textContent = text.slice(index, index + query.length); el.appendChild(mark);
+      start = index + query.length;
+    }
+    el.appendChild(document.createTextNode(text.slice(start)));
+  }
+  function lyricRow(lines, i, query = '') {
+    const row = document.createElement('div'); row.className = 'yl-line'; row.dataset.index = i;
+    row.tabIndex = 0; row.setAttribute('role', 'button');
+    highlighted(row, lines[i].x, query);
+    if ((S.bilingual || query) && lineTrans[i]) {
+      row.classList.add('has-sub');
+      const sub = document.createElement('div'); sub.className = 'yl-sub'; highlighted(sub, lineTrans[i], query); row.appendChild(sub);
+    }
+    row.onclick = (event) => { event.stopPropagation(); seekToLyric(i); };
+    row.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); seekToLyric(i); } };
+    return row;
+  }
+  function renderManualLyrics(center = false) {
+    const lines = S.lyrics || []; const query = lyricSearch.value.trim().toLowerCase();
+    ylTrack.replaceChildren(); lyrEls = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (query && ![lines[i].x, lineTrans[i] || ''].some((text) => text.toLowerCase().includes(query))) continue;
+      const row = lyricRow(lines, i, lyricSearch.value.trim()); row.classList.toggle('on', i === curLineIdx);
+      ylTrack.appendChild(row); lyrEls.push(row);
+    }
+    $('lyricSearchStatus').hidden = !query;
+    $('lyricSearchStatus').textContent = lyrEls.length + ' 句匹配 · 点击定位播放';
+    if (!lyrEls.length) { const empty = document.createElement('div'); empty.className = 'yl-line ph'; empty.textContent = query ? '没有匹配的歌词' : '暂无歌词'; ylTrack.appendChild(empty); }
+    if (center) {
+      const current = lyrEls.find((row) => Number(row.dataset.index) === curLineIdx);
+      if (current) lyricViewport.scrollTop = Math.max(0, current.offsetTop - lyricViewport.clientHeight / 2);
+    } else lyricViewport.scrollTop = 0;
+    lastDomIdx = curLineIdx;
+    btnClearLyricSearch.hidden = !lyricSearch.value;
+    syncLyricScrollbar();
+  }
+  function browseLyrics(center = false) {
+    manualLyrics = true; lyricViewport.classList.add('manual'); btnFollowLyric.hidden = false;
+    renderManualLyrics(center);
+  }
+  function followLyrics() {
+    manualLyrics = false; lyricSearch.value = ''; btnFollowLyric.hidden = true; $('lyricSearchStatus').hidden = true;
+    btnClearLyricSearch.hidden = true;
+    lyricViewport.classList.remove('manual'); lyricViewport.scrollTop = 0; buildLyricsDom(S.lyrics || []); lastLyrCheck = 0;
+  }
+  lyricSearch.addEventListener('input', () => browseLyrics());
+  btnClearLyricSearch.onclick = () => { lyricSearch.value = ''; browseLyrics(true); lyricSearch.focus(); };
+  const lyricInputs = [lyricSearch, lyricViewport, lyricScrollbar];
+  for (const input of [lyricSearch, lyricViewport]) {
+    input.addEventListener('pointerdown', async (event) => {
+      if (event.target !== input) return;
+      if (document.activeElement === input && document.hasFocus()) return;
+      event.preventDefault();
+      await api.focusIslandInput(true);
+      input.focus();
+    });
+  }
+  for (const input of lyricInputs) {
+    input.addEventListener('focus', () => api.setDragging(true));
+    input.addEventListener('blur', () => {
+      requestAnimationFrame(() => {
+        if (lyricInputs.includes(document.activeElement)) return;
+        if (!favOpen && !dragging) api.setDragging(false);
+        api.focusIslandInput(false);
+      });
+    });
+  }
+  window.addEventListener('blur', () => { if (lyricInputs.includes(document.activeElement)) document.activeElement.blur(); });
+  lyricViewport.addEventListener('wheel', (event) => {
+    if (!S.lyrics?.length) return;
+    if (!manualLyrics) { event.preventDefault(); browseLyrics(true); lyricViewport.scrollTop += event.deltaY; }
+  }, { passive: false });
+  lyricViewport.addEventListener('keydown', (event) => {
+    if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End'].includes(event.key) && !manualLyrics) browseLyrics(true);
+  });
+  btnFollowLyric.onclick = (event) => { event.stopPropagation(); followLyrics(); };
+
+  function syncLyricScrollbar() {
+    const maxScroll = lyricViewport.scrollHeight - lyricViewport.clientHeight;
+    lyricScrollbar.hidden = !manualLyrics || maxScroll <= 1 || curState() !== 'expanded';
+    if (lyricScrollbar.hidden) return;
+    const height = lyricScrollbar.clientHeight;
+    const thumbHeight = Math.min(height, Math.max(24, height * lyricViewport.clientHeight / lyricViewport.scrollHeight));
+    const ratio = Math.min(1, Math.max(0, lyricViewport.scrollTop / maxScroll));
+    lyricScrollThumb.style.height = thumbHeight + 'px';
+    lyricScrollThumb.style.transform = 'translateY(' + ((height - thumbHeight) * ratio) + 'px)';
+    lyricScrollbar.setAttribute('aria-valuenow', Math.round(ratio * 100));
+    lyricScrollbar.setAttribute('aria-valuetext', Math.round(ratio * 100) + '%');
+  }
+  lyricViewport.addEventListener('scroll', syncLyricScrollbar, { passive: true });
+  const lyricResize = new ResizeObserver(syncLyricScrollbar);
+  lyricResize.observe(lyricViewport);
+  lyricResize.observe(ylTrack);
+  let scrollbarDrag = null;
+  lyricScrollbar.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || lyricScrollbar.hidden) return;
+    event.preventDefault(); event.stopPropagation();
+    const maxScroll = lyricViewport.scrollHeight - lyricViewport.clientHeight;
+    const travel = lyricScrollbar.clientHeight - lyricScrollThumb.offsetHeight;
+    if (maxScroll <= 0 || travel <= 0) return;
+    if (event.target !== lyricScrollThumb) {
+      const y = event.clientY - lyricScrollbar.getBoundingClientRect().top - lyricScrollThumb.offsetHeight / 2;
+      lyricViewport.scrollTop = Math.max(0, Math.min(1, y / travel)) * maxScroll;
+    }
+    scrollbarDrag = { id: event.pointerId, y: event.clientY, scroll: lyricViewport.scrollTop, maxScroll, travel };
+    lyricScrollbar.classList.add('dragging');
+    lyricScrollbar.setPointerCapture(event.pointerId);
+    api.setDragging(true);
+    api.focusIslandInput(true).then(() => lyricScrollbar.focus());
+    syncLyricScrollbar();
+  });
+  lyricScrollbar.addEventListener('pointermove', (event) => {
+    if (!scrollbarDrag || event.pointerId !== scrollbarDrag.id) return;
+    const { y, scroll, maxScroll, travel } = scrollbarDrag;
+    lyricViewport.scrollTop = Math.max(0, Math.min(maxScroll, scroll + (event.clientY - y) * maxScroll / travel));
+    syncLyricScrollbar();
+  });
+  const endScrollbarDrag = () => {
+    if (!scrollbarDrag) return;
+    scrollbarDrag = null;
+    lyricScrollbar.classList.remove('dragging');
+    if (!lyricInputs.includes(document.activeElement) && !favOpen && !dragging) api.setDragging(false);
+  };
+  for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) lyricScrollbar.addEventListener(event, endScrollbarDrag);
+  lyricScrollbar.addEventListener('keydown', (event) => {
+    const maxScroll = lyricViewport.scrollHeight - lyricViewport.clientHeight;
+    const next = { ArrowDown: lyricViewport.scrollTop + 32, ArrowUp: lyricViewport.scrollTop - 32,
+      PageDown: lyricViewport.scrollTop + lyricViewport.clientHeight * .85, PageUp: lyricViewport.scrollTop - lyricViewport.clientHeight * .85,
+      Home: 0, End: maxScroll }[event.key];
+    if (next === undefined) return;
+    event.preventDefault(); event.stopPropagation(); lyricViewport.scrollTop = Math.max(0, Math.min(maxScroll, next)); syncLyricScrollbar();
+  });
 
   function ensureLyrWindow(lines, center) {
     let start = center - LYR_WINDOW;
@@ -580,18 +734,7 @@
     lyrEls = [];
     const end = Math.min(lines.length - 1, start + LYR_WINDOW * 2);
     for (let i = start; i <= end; i++) {
-      const d = document.createElement('div');
-      d.className = 'yl-line';
-      d.textContent = lines[i].x;
-      if (S.bilingual && lineTrans[i]) {
-        d.classList.add('has-sub');
-        const sub = document.createElement('div');
-        sub.className = 'yl-sub';
-        sub.textContent = lineTrans[i];
-        d.appendChild(sub);
-      }
-      const idx = i;
-      d.addEventListener('click', (e) => { e.stopPropagation(); seekToLyric(idx); });
+      const d = lyricRow(lines, i);
       ylTrack.appendChild(d);
       lyrEls.push(d);
     }
@@ -601,12 +744,16 @@
     lyrHeights = lyrEls.map((el) => el.offsetHeight || LYR_LINE_H);
   }
 
-  function seekToLyric(idx) {
+  async function seekToLyric(idx) {
     if (S.duration <= 0 || !S.hasSession) return;
     const lines = S.lyrics || [];
     if (!lines[idx]) return;
-    api.command('seek', lines[idx].t);
-    S.position = lines[idx].t;
+    const key = S.lyricKey;
+    const result = await api.lyricsSeek({ title: S.title, artist: S.artist, appId: S.appId, position: lines[idx].t });
+    if (S.lyricKey !== key) return;
+    if (!result.ok) { $('lyricSearchStatus').hidden = false; $('lyricSearchStatus').textContent = result.message; return; }
+    followLyrics();
+    S.position = result.position;
     S.updatedAt = performance.now();
     S.seekGraceUntil = performance.now() + 1500;
     curLineIdx = idx - 1;
@@ -658,6 +805,13 @@
 
     // DOM 更新仅在展开面板可见时进行
     if (curState() === 'expanded' || curState() === 'favlist') {
+      if (manualLyrics) {
+        if (idx !== lastDomIdx) {
+          ylTrack.querySelector('.on')?.classList.remove('on');
+          ylTrack.querySelector('[data-index="' + idx + '"]')?.classList.add('on');
+          lastDomIdx = idx;
+        }
+      } else {
       ensureLyrWindow(lines, idx);
       if (idx !== lastDomIdx) {
         // 平移量按实测累计行高计算(长句换行/双语副行更高), 当前行垂直居中;
@@ -684,6 +838,7 @@
         const el = lyrEls[idx - lyrWinStart];
         if (el) el.classList.add('on');
         lastDomIdx = idx;
+      }
       }
     } else if (lastDomIdx !== -999) {
       lastDomIdx = -999; // 收起后标记, 下次展开强制刷新高亮
@@ -770,6 +925,7 @@
     const es = favEntries();
     flCount.textContent = es.length + ' 首';
     flList.innerHTML = '';
+    $('flExport').disabled = true;
     if (!es.length) {
       const d = document.createElement('div');
       d.className = 'fl-empty';
@@ -780,6 +936,9 @@
     for (const en of es) {
       const row = document.createElement('div');
       row.className = 'fl-row';
+      const check = document.createElement('input'); check.type = 'checkbox'; check.setAttribute('aria-label', '选择 ' + en.t);
+      check.dataset.title = en.t; check.dataset.artist = en.a;
+      check.onchange = () => { $('flExport').disabled = !flList.querySelector('input:checked'); };
       const t = document.createElement('span');
       t.className = 'fl-t';
       t.textContent = en.t;
@@ -796,10 +955,20 @@
         buildFav();
         render();
       };
-      row.appendChild(t); row.appendChild(a); row.appendChild(x);
+      row.appendChild(check); row.appendChild(t); row.appendChild(a); row.appendChild(x);
       flList.appendChild(row);
     }
   }
+  $('flExport').onclick = async (event) => {
+    event.stopPropagation();
+    const tracks = [...flList.querySelectorAll('input:checked')].map((input) => ({ title: input.dataset.title, artist: input.dataset.artist }));
+    $('flExport').disabled = true;
+    try {
+      const result = await api.openLyricsDownload({ tracks });
+      if (!result.ok) { flCount.textContent = result.message; flCount.title = result.message; }
+    } catch (error) { flCount.textContent = '打开失败'; flCount.title = error.message; }
+    finally { $('flExport').disabled = !flList.querySelector('input:checked'); }
+  };
   let favOpen = false;
   function openFav() {
     buildFav();
@@ -849,6 +1018,7 @@
   api.onExpWidth((v) => {
     const w = Number(v) > 0 ? Number(v) : 672;
     island.style.setProperty('--exp-w', w + 'px');
+    $('stage').style.setProperty('--exp-w', w + 'px');
   });
   api.onBilingual((b) => {
     S.bilingual = !!b;

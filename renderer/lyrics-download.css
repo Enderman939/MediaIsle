@@ -3,6 +3,24 @@
 html, body { height: 100%; margin: 0; }
 body { display: flex; flex-direction: column; background: var(--surface); color: var(--on-surface); font-family: 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', sans-serif; font-size: 13px; }
 button, input { font: inherit; }
+[hidden] { display: none !important; }
+.workspace-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0 18px; }
+.workspace-actions .note { margin: 0; }
+.small { min-height: 30px; padding: 6px 12px; font-size: 11px; }
+#editorPanel { margin-bottom: 22px; }
+#editorPanel h2 { margin: 16px 0 8px; color: var(--primary); }
+.editor-rows { max-height: 260px; overflow-y: auto; padding-right: 4px; scrollbar-width: thin; }
+.editor-row { display: grid; grid-template-columns: 82px minmax(0, 1fr) 32px; gap: 6px; margin-bottom: 6px; }
+.editor-row input { width: 100%; min-width: 0; padding: 9px 8px; border: 1px solid var(--outline); border-radius: 8px; color: var(--on-surface); background: var(--container); user-select: text; }
+.editor-row button { border: none; border-radius: 8px; background: var(--high); color: var(--muted); }
+.batch-track { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--outline); overflow-wrap: anywhere; }
+.batch-track input { accent-color: var(--primary); }
+.batch-track span { min-width: 0; }
+.batch-track small { display: block; color: var(--muted); margin-top: 3px; }
+.batch-tracks { max-height: 220px; overflow: auto; border: 1px solid var(--outline); border-radius: 12px; }
+progress { width: 100%; margin: 16px 0 8px; accent-color: var(--primary); }
+.batch-result { padding: 8px 0; border-bottom: 1px solid var(--outline); overflow-wrap: anywhere; user-select: text; }
+.batch-result[data-error="true"] { color: #ffb4ab; }
 button { cursor: pointer; }
 button:disabled { cursor: default; opacity: .4; }
 svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }

@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('island', {
   reportState: (st) => ipcRenderer.send('island-state', st),
   // 进度条拖动状态(拖动期间保持展开)
   setDragging: (d) => ipcRenderer.send('island-dragging', d),
+  focusIslandInput: (enabled) => ipcRenderer.invoke('island-input-focus', enabled),
   // 发送控制命令: play / pause / toggle / next / prev / seek / volume /
   // toggle-mute / shuffle / repeat / switch-source(字符串 appId)
   command: (cmd, val) => ipcRenderer.send('media-command', cmd, val),
@@ -24,6 +25,15 @@ contextBridge.exposeInMainWorld('island', {
   lyricsDownloadContext: () => ipcRenderer.invoke('lyrics-download-context'),
   lyricsDownloadPreview: (q) => ipcRenderer.invoke('lyrics-download-preview', q),
   onLyricsDownloadChanged: (cb) => ipcRenderer.on('lyrics-download-changed', () => cb()),
+  onLyricsCloseBlocked: (cb) => ipcRenderer.on('lyrics-close-blocked', () => cb()),
+  lyricsExportPreferences: (q) => ipcRenderer.invoke('lyrics-export-preferences', q),
+  lyricsCustomSave: (q) => ipcRenderer.invoke('lyrics-custom-save', q),
+  lyricsCustomReset: (q) => ipcRenderer.invoke('lyrics-custom-reset', q),
+  lyricsEditorDirty: (q) => ipcRenderer.invoke('lyrics-editor-dirty', q),
+  lyricsSeek: (q) => ipcRenderer.invoke('lyrics-seek', q),
+  lyricsBatchExport: (q) => ipcRenderer.invoke('lyrics-batch-export', q),
+  lyricsBatchCancel: () => ipcRenderer.invoke('lyrics-batch-cancel'),
+  onLyricsBatchProgress: (cb) => ipcRenderer.on('lyrics-batch-progress', (_e, value) => cb(value)),
   // 推送当前桌面歌词行
   desktopLine: (text) => ipcRenderer.send('desktop-lyric', text),
   // 桌面歌词窗口订阅歌词行
